@@ -1,0 +1,15 @@
+{
+  "name": "dapo-spin",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "nuxt dev",
+    "build": "nuxt build",
+    "generate": "nuxt generate",
+    "preview": "nuxt preview"
+  },
+  "devDependencies": {
+    "nuxt": "^3.17.0",
+    "playwright-core": "^1.64.0"
+  }
+}
