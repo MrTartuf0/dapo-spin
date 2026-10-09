@@ -194,8 +194,12 @@ float droop(vec2 p) {
   float d = max(0.0, length(p - uSupport) - uReach);
   float base = (1.0 - uSpread) * uDroopK * pow(d, 1.6);
   float sagv = uSag * d * d * 0.7;
-  float ang = atan(p.y - uSupport.y, p.x - uSupport.x);
-  float fold = (1.0 - uSpread) * 0.018 * d * (sin(ang * 8.0) * 0.7 + sin(ang * 3.0 + 1.0) * 0.3);
+  // atan(0,0) è NaN su molte GPU: niente pieghe dentro la zona d'appoggio
+  float fold = 0.0;
+  if (d > 0.0) {
+    float ang = atan(p.y - uSupport.y, p.x - uSupport.x);
+    fold = (1.0 - uSpread) * 0.018 * d * (sin(ang * 8.0) * 0.7 + sin(ang * 3.0 + 1.0) * 0.3);
+  }
   return -(base + sagv + fold) * uDroopSign;
 }
 
@@ -235,7 +239,7 @@ void main() {
   float w = ${deriv ? 'fwidth(sd)' : '0.002'};
   float a = 1.0 - smoothstep(-w, w, sd);
   if (a <= 0.003) discard;
-  vec4 col = gl_FrontFacing ? texture2D(uFront, vUv) : texture2D(uBack, vec2(1.0 - vUv.x, vUv.y));
+  vec4 col = gl_FrontFacing ? texture2D(uFront, vUv) : texture2D(uBack, vec2(vUv.x, 1.0 - vUv.y));
   if (col.a < 0.02) discard;
   gl_FragColor = vec4(col.rgb * vShade, col.a * a);
 }`
