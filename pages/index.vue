@@ -9,7 +9,68 @@ const error = ref('')
 /* editor della cornice: a quale lato / design è destinato il risultato */
 const editing = ref<{ file: File; side: 'front' | 'back'; designId?: string } | null>(null)
 
-onMounted(load)
+onMounted(() => {
+  load()
+  window.addEventListener('paste', onPaste)
+})
+onBeforeUnmount(() => window.removeEventListener('paste', onPaste))
+
+/* ---- incolla dagli appunti ---- */
+/** Estrae un'immagine (o un SVG come testo) da un DataTransfer/ClipboardItem */
+function fileFromClipboardData(data: DataTransfer | null): File | null {
+  if (!data) return null
+  for (const item of Array.from(data.items)) {
+    if (item.kind === 'file' && item.type.startsWith('image/')) return item.getAsFile()
+  }
+  const text = data.getData('text/plain')?.trim()
+  if (text && text.startsWith('<') && /<svg[\s>]/i.test(text)) {
+    return new File([text], 'clipboard.svg', { type: 'image/svg+xml' })
+  }
+  return null
+}
+
+function openEditorWithFile(file: File, side: 'front' | 'back', designId?: string) {
+  error.value = ''
+  editing.value = { file, side, designId }
+}
+
+/** Cmd/Ctrl+V ovunque nella pagina: va sul lato ancora vuoto (fronte, poi retro) */
+function onPaste(e: ClipboardEvent) {
+  if (editing.value) return
+  if (e.target instanceof HTMLInputElement || e.target instanceof HTMLTextAreaElement) return
+  const file = fileFromClipboardData(e.clipboardData)
+  if (!file) return
+  e.preventDefault()
+  const side: 'front' | 'back' = !frontFile.value ? 'front' : 'back'
+  openEditorWithFile(file, side)
+}
+
+/** Bottone "Incolla": legge gli appunti via API (richiede il permesso del browser) */
+async function pasteFor(side: 'front' | 'back', designId?: string) {
+  error.value = ''
+  try {
+    if (!navigator.clipboard?.read) throw new Error('Il browser non supporta la lettura degli appunti: usa Cmd/Ctrl+V')
+    const items = await navigator.clipboard.read()
+    for (const item of items) {
+      const type = item.types.find(t => t.startsWith('image/'))
+      if (type) {
+        const blob = await item.getType(type)
+        openEditorWithFile(new File([blob], 'clipboard.' + type.split('/')[1], { type }), side, designId)
+        return
+      }
+      if (item.types.includes('text/plain')) {
+        const text = (await (await item.getType('text/plain')).text()).trim()
+        if (text.startsWith('<') && /<svg[\s>]/i.test(text)) {
+          openEditorWithFile(new File([text], 'clipboard.svg', { type: 'image/svg+xml' }), side, designId)
+          return
+        }
+      }
+    }
+    error.value = 'Negli appunti non c\'è un\'immagine'
+  } catch (err: any) {
+    error.value = err?.name === 'NotAllowedError' ? 'Permesso appunti negato: usa Cmd/Ctrl+V' : (err.message || 'Impossibile leggere gli appunti')
+  }
+}
 
 const previewFront = computed(() => active.value?.front ?? frontFile.value ?? DEFAULT_FRONT)
 const previewBack = computed(() => active.value?.back ?? backFile.value ?? DEFAULT_BACK)
@@ -63,16 +124,23 @@ const editorTitle = computed(() => editing.value ? (editing.value.side === 'fron
         <h2>Nuovo dapo</h2>
         <input v-model="name" class="text" type="text" placeholder="Nome (opzionale)">
 
-        <label class="file" :class="{ ok: frontFile }">
-          <span>Fronte</span>
-          <input type="file" accept="image/*,.svg" @change="openEditor('front', $event)">
-          <img v-if="frontFile" :src="frontFile" alt="">
-        </label>
-        <label class="file" :class="{ ok: backFile }">
-          <span>Retro</span>
-          <input type="file" accept="image/*,.svg" @change="openEditor('back', $event)">
-          <img v-if="backFile" :src="backFile" alt="">
-        </label>
+        <div class="side">
+          <label class="file" :class="{ ok: frontFile }">
+            <span>Fronte</span>
+            <input type="file" accept="image/*,.svg" @change="openEditor('front', $event)">
+            <img v-if="frontFile" :src="frontFile" alt="">
+          </label>
+          <button class="paste" title="Incolla dagli appunti" @click="pasteFor('front')">Incolla</button>
+        </div>
+        <div class="side">
+          <label class="file" :class="{ ok: backFile }">
+            <span>Retro</span>
+            <input type="file" accept="image/*,.svg" @change="openEditor('back', $event)">
+            <img v-if="backFile" :src="backFile" alt="">
+          </label>
+          <button class="paste" title="Incolla dagli appunti" @click="pasteFor('back')">Incolla</button>
+        </div>
+        <p class="hint">Oppure Cmd/Ctrl+V con un'immagine negli appunti (va sul primo lato vuoto).</p>
 
         <p v-if="error" class="error">{{ error }}</p>
         <div class="row">
@@ -92,6 +160,8 @@ const editorTitle = computed(() => editing.value ? (editing.value.side === 'fron
             <div class="mini">
               <label title="Sostituisci fronte">F<input type="file" accept="image/*,.svg" @change="openEditor('front', $event, d.id)"></label>
               <label title="Sostituisci retro">R<input type="file" accept="image/*,.svg" @change="openEditor('back', $event, d.id)"></label>
+              <button class="del" title="Incolla sul fronte" @click="pasteFor('front', d.id)">⎘F</button>
+              <button class="del" title="Incolla sul retro" @click="pasteFor('back', d.id)">⎘R</button>
               <button class="del" title="Elimina" @click="remove(d.id)">✕</button>
             </div>
           </li>
@@ -168,6 +238,9 @@ h2 { margin: 0 0 0.8rem; font-size: 1rem; }
 .file:hover { border-color: var(--accent); }
 .file.ok { border-style: solid; border-color: var(--accent-2); }
 .file input { display: none; }
+.side { display: flex; gap: 0.4rem; align-items: stretch; }
+.side .file { flex: 1; }
+.paste { padding: 0.4rem 0.7rem; font-size: 0.85rem; }
 .file img { width: 36px; height: 36px; margin-left: auto; clip-path: var(--star); object-fit: cover; }
 
 .row { display: flex; gap: 0.5rem; }
@@ -190,6 +263,8 @@ h2 { margin: 0 0 0.8rem; font-size: 1rem; }
 }
 .mini input { display: none; }
 .mini .del:hover { color: #ff7b7b; border-color: #ff7b7b; }
+.mini .del[title^="Incolla"] { width: auto; padding: 0 5px; }
+.mini .del[title^="Incolla"]:hover { color: var(--accent-2); border-color: var(--accent-2); }
 
 .main { padding: 1.5rem; display: flex; flex-direction: column; gap: 1rem; }
 .top { display: flex; align-items: baseline; justify-content: space-between; gap: 1rem; flex-wrap: wrap; }
