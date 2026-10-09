@@ -5,6 +5,8 @@ Simulatore Nuxt 3 del dapo (⌀ 67 cm, ~400 g): carica i design dei due lati e g
 ## Come si usa
 - **Click sul dapo / Spazio / "Flick + lancio"**: rotazione di polso + lancio in alto, ricade per gravità sulla mano.
 - **Shift+click / "Solo flick"**: rilancia lo spin tenendolo in mano.
+- **P / "Pinch verticale"**: la stella gira come una ruota nel piano verticale, sempre con la stessa faccia esposta. La mano pinza un punto del tessuto a metà raggio (non il centro né i bordi) mentre gira e lo tiene fermo: la stella continua per inerzia attorno alla pinza (il centro oscilla attorno alla mano) mentre la torsione cresce e la frena — senza fermarla: poco prima dell'arresto viene lanciata con un arco basso all'altra mano, che pinza al volo e rifà lo stesso, avanti e indietro finché non lo spegni. Solo animazione (torsione + ammucchiamento attorno alla pinza nel vertex shader).
+- **B / "Boomerang"**: dalla posizione sul dito, il dapo parte verso sinistra girando in orizzontale, si allontana e rientra da destra lungo un'ellisse (inclinandosi nella curva come un vero boomerang) e torna sul dito.
 - **F / "Gira lato"**: mostra l'altro design.
 - Pannello *Impostazioni fisica*: spin dato dal flick (giri/s), altezza lancio (cm), attrito delle dita, stabilizzazione giroscopica.
 

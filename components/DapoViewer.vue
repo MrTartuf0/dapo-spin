@@ -28,6 +28,18 @@ const fingerFriction = ref(1.2)  // rad/s²: coppia frenante del dito fermo
 const fingerRevs = ref(2.5)      // giri/s del dito che orbita
 const fingerRadiusCm = ref(6)
 const stabilize = ref(1)
+const pinchRevs = ref(1.5)       // giri/s della ruota quando viene pinzata
+const PINCH_HAND_Y = 0.52        // m: altezza delle mani
+const PINCH_HAND_X = 0.22        // m: mano destra (+) / sinistra (−)
+const PINCH_RHO = 0.5            // frazione del raggio: si pinza a metà raggio, in basso
+const PINCH_T = 0.55             // s: durata della pinzata (frenata per torsione)
+const PINCH_KEEP = 0.35          // frazione di spin rimasta quando si lancia: il dapo non si ferma mai
+const PINCH_FLIGHT = 0.7         // s: volo da una mano all'altra
+const PINCH_TILT = -0.25         // rad: la ruota è leggermente girata verso lo spettatore
+const BOOM_T = 2.4               // s: durata del volo a boomerang
+const BOOM_A = 0.85              // m: semiasse laterale dell'ellisse
+const BOOM_D = 1.7               // m: profondità dell'ellisse
+const BOOM_H = 0.3              // m: quanto sale
 
 /* ---------- stato ---------- */
 const omega = ref(0)             // rad/s
@@ -49,6 +61,26 @@ const fingerOn = ref(false)
 let fingerPhase = 0              // rad
 const fingerAmt = ref(0)
 let offX = 0, offY = 0           // m: traslazione del centro del tessuto nel piano della mano
+
+/* pinch verticale (ruota nel piano verticale, sempre la stessa faccia) + boomerang */
+const pinchOn = ref(false)
+let vertMix = 0                  // 0 = piatta sul dito, 1 = ruota verticale
+type PinchPhase = 'pinch' | 'toss'
+let pinchPhase: PinchPhase = 'pinch'
+let pinchHand = 1                // +1 destra, −1 sinistra
+let pinchPx = 0, pinchPy = 0     // punto pinzato (locale)
+let thetaCatch = 0               // spin al momento della pinzata
+const pinchOmega = ref(0)        // rad/s della ruota
+let pinchGather = 0              // 0..1 tessuto ammucchiato nella mano
+let pinchTwist = 0               // rad di torsione attorno alla pinza
+let pinchT = 0
+let cx = 0, cy = PINCH_HAND_Y, cz = 0   // centro della stella (mondo)
+let fromX = 0, fromY = 0, fromZ = 0     // partenza del volo
+const boomOn = ref(false)
+let boomT = 0
+let boomMix = 0                  // per la camera
+let bx = 0, by = 0, bz = 0       // m: posizione del dapo lungo l'ellisse
+let bank = 0                     // rad: inclinazione nella curva
 
 const clamp = (v: number, a = 0, b = 1) => Math.min(b, Math.max(a, v))
 let raf = 0
@@ -115,7 +147,7 @@ function step(now: number) {
   }
 
   /* tessuto: centrifuga vs gravità */
-  const target = inHand.value ? clamp(omega.value / SPREAD_OMEGA) : 1
+  const target = inHand.value && !boomOn.value ? clamp(omega.value / SPREAD_OMEGA) : 1
   spread.value += (target - spread.value) * Math.min(1, dt * (target > spread.value ? 7 : 3))
   sag.value *= Math.exp(-3.2 * dt)
 
@@ -127,6 +159,73 @@ function step(now: number) {
   offX += (tx - offX) * Math.min(1, dt * 8)
   offY += (ty - offY) * Math.min(1, dt * 8)
 
+  /* pinch verticale: la stella gira come una ruota; la mano pinza un punto a metà raggio
+     in basso e lo tiene fermo: la stella continua per inerzia attorno alla pinza mentre
+     la torsione cresce e la frena; poi lancio all'altra mano, che pinza al volo */
+  const vertActive = pinchOn.value && inHand.value && flickT < 0
+  vertMix += ((vertActive ? 1 : 0) - vertMix) * Math.min(1, dt * 4)
+  if (vertMix < 0.001 && !vertActive) vertMix = 0
+  const handX = () => pinchHand * PINCH_HAND_X
+  if (vertActive) {
+    pinchT += dt
+    if (pinchPhase === 'pinch') {
+      // frenata per torsione: lo spin cala ma non si ferma; si lancia prima dell'arresto
+      const u = clamp(pinchT / PINCH_T)
+      const w0 = pinchRevs.value * 2 * Math.PI
+      pinchOmega.value = w0 * (1 - (1 - PINCH_KEEP) * u)
+      pinchGather += (1 - pinchGather) * Math.min(1, dt * 10)
+      pinchTwist = spin.value - thetaCatch
+      // la stella ruota attorno alla pinza: il centro orbita attorno alla mano
+      const d = spin.value - thetaCatch
+      cx = handX() - Math.sin(d) * PINCH_RHO * R
+      cy = PINCH_HAND_Y + Math.cos(d) * PINCH_RHO * R
+      cz = 0
+      if (u >= 1) {
+        // lancio verso l'altra mano prima che si fermi, stessa faccia esposta
+        pinchPhase = 'toss'; pinchT = 0
+        fromX = cx; fromY = cy; fromZ = cz
+        pinchHand = -pinchHand
+      }
+    } else if (pinchPhase === 'toss') {
+      const u = clamp(pinchT / PINCH_FLIGHT)
+      pinchGather += (0 - pinchGather) * Math.min(1, dt * 8)
+      pinchTwist *= Math.exp(-14 * dt)                     // la torsione si scioglie…
+      pinchOmega.value += (pinchRevs.value * 2 * Math.PI - pinchOmega.value) * Math.min(1, dt * 6) // …e il lancio ridà lo spin
+      const toX = handX(), toY = PINCH_HAND_Y + PINCH_RHO * R
+      cx = fromX + (toX - fromX) * u
+      cy = fromY + (toY - fromY) * u + 0.9 * u * (1 - u)   // arco basso, come un passaggio tra le mani
+      cz = 0
+      if (u >= 1) catchNow()
+    }
+    spin.value = (spin.value + pinchOmega.value * dt) % (2 * Math.PI)
+    omega.value = 0
+  } else {
+    pinchOmega.value *= Math.exp(-2.5 * dt)
+    pinchGather *= Math.exp(-4 * dt)
+    pinchTwist *= Math.exp(-6 * dt)
+    // rientro verso il dito
+    cx *= Math.exp(-5 * dt); cz *= Math.exp(-5 * dt)
+    cy += (PINCH_HAND_Y - cy) * Math.min(1, dt * 5)
+  }
+
+  /* boomerang: piatto, parte verso sinistra, si allontana e rientra da destra
+     lungo un'ellisse, girando sempre in orizzontale, fino a tornare sul dito */
+  boomMix += ((boomOn.value ? 1 : 0) - boomMix) * Math.min(1, dt * 3)
+  if (boomOn.value) {
+    boomT += dt
+    const u = clamp(boomT / BOOM_T)
+    const e = u < 0.5 ? 2 * u * u : 1 - Math.pow(-2 * u + 2, 2) / 2   // parte e arriva morbido
+    const a = 2 * Math.PI * e
+    bx = -BOOM_A * Math.sin(a)
+    bz = -BOOM_D * (1 - Math.cos(a)) / 2
+    by = BOOM_H * Math.sin(Math.PI * e)
+    bank = 0.5 * Math.sin(a)                                             // si inclina dentro la curva
+    omega.value += (3 * 2 * Math.PI - omega.value) * Math.min(1, dt * 4)
+    if (u >= 1) { boomOn.value = false; bx = by = bz = 0; bank = 0; wobbleAmp.value = Math.min(0.3, wobbleAmp.value + 0.15) }
+  } else {
+    bank *= Math.exp(-6 * dt)
+  }
+
   /* flip */
   const flipTarget = flipped.value ? Math.PI : 0
   flipAngle += (flipTarget - flipAngle) * Math.min(1, dt * 9)
@@ -137,23 +236,51 @@ function step(now: number) {
   const alive = omega.value > 0 || !inHand.value || flickT >= 0 || flipAngle !== flipTarget ||
     fingerAmt.value > 0.001 || Math.abs(handTwist) > 0.001 || sag.value > 0.001 ||
     wobbleAmp.value > 0.001 || Math.abs(spread.value - target) > 0.002 ||
-    Math.abs(offX - tx) + Math.abs(offY - ty) > 1e-4
+    Math.abs(offX - tx) + Math.abs(offY - ty) > 1e-4 || pinchOn.value || boomOn.value || boomMix > 0.001 || vertMix > 0 || Math.abs(pinchOmega.value) > 0.01 || pinchGather > 0.001 || fingerActive
   raf = alive ? requestAnimationFrame(step) : 0
 }
 
 function start() { if (!raf) { last = performance.now(); raf = requestAnimationFrame(step) } }
 function flick(withThrow = true) {
   if (!inHand.value || flickT >= 0) return
+  pinchOn.value = false; boomOn.value = false
   flickT = 0; flickThrow = withThrow; flickOmegaGiven = 0; start()
 }
 function flip() { flipped.value = !flipped.value; start() }
 function toggleFinger() { fingerOn.value = !fingerOn.value; start() }
+/** la mano pinza il punto che ora sta a metà raggio in basso */
+function catchNow() {
+  pinchPhase = 'pinch'; pinchT = 0
+  thetaCatch = spin.value
+  const a = -Math.PI / 2 - spin.value
+  pinchPx = Math.cos(a) * R * PINCH_RHO
+  pinchPy = Math.sin(a) * R * PINCH_RHO
+  pinchGather = 0; pinchTwist = 0
+  pinchOmega.value = pinchRevs.value * 2 * Math.PI
+  cx = pinchHand * PINCH_HAND_X; cy = PINCH_HAND_Y + PINCH_RHO * R; cz = 0
+}
+function togglePinch() {
+  pinchOn.value = !pinchOn.value
+  if (pinchOn.value) {
+    fingerOn.value = false
+    boomOn.value = false; pinchHand = 1; catchNow()
+  }
+  start()
+}
+function boomerang() {
+  if (!inHand.value || flickT >= 0 || boomOn.value) return
+  fingerOn.value = false; pinchOn.value = false
+  boomOn.value = true; boomT = 0
+  start()
+}
 function reset() {
   cancelAnimationFrame(raf); raf = 0
   omega.value = 0; spin.value = 0; height.value = 0; vy = 0; inHand.value = true
   wobbleAmp.value = 0; wobblePhase = 0; spread.value = 0; sag.value = 0
   handTwist = 0; flickT = -1; flipped.value = false; flipAngle = 0
   fingerOn.value = false; fingerAmt.value = 0; fingerPhase = 0; offX = offY = 0
+  pinchOn.value = false; boomOn.value = false; boomT = 0; boomMix = 0; bx = by = bz = 0; vertMix = 0; pinchOmega.value = 0; pinchGather = 0; pinchTwist = 0; bank = 0
+  cx = 0; cy = PINCH_HAND_Y; cz = 0
   render()
 }
 function onKey(e: KeyboardEvent) {
@@ -161,6 +288,8 @@ function onKey(e: KeyboardEvent) {
   if (e.code === 'Space') { e.preventDefault(); flick(true) }
   if (e.key.toLowerCase() === 'f') flip()
   if (e.key.toLowerCase() === 'd') toggleFinger()
+  if (e.key.toLowerCase() === 'p') togglePinch()
+  if (e.key.toLowerCase() === 'b') boomerang()
 }
 
 /* =========================================================================
@@ -186,6 +315,8 @@ uniform mat4 uMVP;
 uniform mat4 uModel;
 uniform float uSpread, uSag, uReach, uDroopK, uDroopSign, uR;
 uniform vec2 uSupport;
+uniform float uPinchMix, uGather, uSigma, uTwist;
+uniform vec2 uPinch;
 varying vec2 vUv;
 varying vec2 vLocal;
 varying float vShade;
@@ -215,7 +346,18 @@ void main() {
   vShade = 0.72 + 0.28 * abs(dot(nw, light));
   vUv = vec2(p.x / uR * 0.5 + 0.5, p.y / uR * 0.5 + 0.5);
   vLocal = p;
-  gl_Position = uMVP * vec4(p, z, 1.0);
+  vec3 pos = vec3(p, z);
+  if (uPinchMix > 0.0) {
+    // il tessuto vicino alla pinza resta con la mano: si torce e si ammucchia
+    vec2 r = p - uPinch;
+    float w = exp(-dot(r, r) / (2.0 * uSigma * uSigma));
+    float a = -uTwist * w * 0.18;                       // solo lo strato esterno: deformazione appena accennata
+    vec2 rr = vec2(r.x * cos(a) - r.y * sin(a), r.x * sin(a) + r.y * cos(a)) * (1.0 - 0.12 * w * uGather);
+    float zz = z * (1.0 - uPinchMix) + 0.015 * w * uGather;
+    pos = mix(vec3(p, z), vec3(uPinch + rr, zz), uPinchMix);
+    vShade = mix(vShade, vShade * (1.0 - 0.12 * w * uGather), uPinchMix);
+  }
+  gl_Position = uMVP * vec4(pos, 1.0);
 }`
 
 const FS = (deriv: boolean) => `
@@ -264,7 +406,7 @@ function initGL() {
   gl.linkProgram(prog)
   if (!gl.getProgramParameter(prog, gl.LINK_STATUS)) throw new Error(gl.getProgramInfoLog(prog) || 'link')
   gl.useProgram(prog)
-  for (const n of ['uMVP', 'uModel', 'uSpread', 'uSag', 'uReach', 'uDroopK', 'uDroopSign', 'uR', 'uSupport', 'uFront', 'uBack', 'uHalfSide'])
+  for (const n of ['uMVP', 'uModel', 'uSpread', 'uSag', 'uReach', 'uDroopK', 'uDroopSign', 'uR', 'uSupport', 'uFront', 'uBack', 'uHalfSide', 'uPinchMix', 'uGather', 'uSigma', 'uTwist', 'uPinch'])
     uni[n] = gl.getUniformLocation(prog, n)
 
   /* mesh: griglia N×N sul quadrato [-R, R]² */
@@ -279,8 +421,9 @@ function initGL() {
   k = 0
   for (let j = 0; j < N; j++) for (let i = 0; i < N; i++) {
     const a = j * (N + 1) + i, b = a + 1, c2 = a + N + 1, d = c2 + 1
-    idx[k++] = a; idx[k++] = c2; idx[k++] = b
-    idx[k++] = b; idx[k++] = c2; idx[k++] = d
+    // antiorario visto da +z (lato fronte)
+    idx[k++] = a; idx[k++] = b; idx[k++] = c2
+    idx[k++] = b; idx[k++] = d; idx[k++] = c2
   }
   indexCount = idx.length
   const vbo = gl.createBuffer(); gl.bindBuffer(gl.ARRAY_BUFFER, vbo); gl.bufferData(gl.ARRAY_BUFFER, pos, gl.STATIC_DRAW)
@@ -294,6 +437,7 @@ function initGL() {
   gl.uniform1f(uni.uR, R)
   gl.uniform1f(uni.uHalfSide, R * Math.SQRT1_2)
   gl.uniform1f(uni.uDroopK, 0.9)
+  gl.uniform1f(uni.uSigma, 0.07)
   gl.uniform1i(uni.uFront, 0)
   gl.uniform1i(uni.uBack, 1)
   texFront = makeTexture(); texBack = makeTexture()
@@ -380,9 +524,10 @@ function render() {
   /* camera: inquadra il dapo al 62 % della larghezza, con spazio sopra per il lancio */
   const fovy = 38 * Math.PI / 180
   const tanH = Math.tan(fovy / 2) * aspect
-  const dist = Math.max(1.2, (DIAMETER / 0.56) / (2 * tanH))
-  const el = 36 * Math.PI / 180
-  const targetY = -0.04 + throwHeightCm.value / 100 * 0.42
+  const dist = Math.max(1.2, (DIAMETER / 0.56) / (2 * tanH)) * (1 + 0.45 * vertMix + 0.75 * boomMix)
+  // dall'alto per il dapo sul dito, quasi frontale per la ruota verticale
+  const el = (36 * (1 - vertMix) + 14 * vertMix) * Math.PI / 180
+  const targetY = (-0.04 + throwHeightCm.value / 100 * 0.42) * (1 - vertMix) + 0.5 * vertMix + 0.45 * boomMix
   const eye = [0, targetY + dist * Math.sin(el), dist * Math.cos(el)]
   const P = m4.perspective(fovy, aspect, 0.1, 20)
   const V = m4.lookAt(eye, [0, targetY, 0], [0, 1, 0])
@@ -391,11 +536,23 @@ function render() {
   const nx = wobbleAmp.value * Math.sin(wobblePhase)
   const ny = wobbleAmp.value * Math.cos(wobblePhase)
   const twist = inHand.value ? handTwist * 0.4 : 0
-  let M = m4.translate(offX, height.value, offY)
-  M = m4.mul(M, m4.rotX(-Math.PI / 2))         // piano del tessuto orizzontale
-  M = m4.mul(M, m4.rotX(flipAngle))             // ribaltamento sull'altro lato
-  M = m4.mul(M, m4.rotX(nx)); M = m4.mul(M, m4.rotY(ny))   // nutazione
-  M = m4.mul(M, m4.rotZ(spin.value + twist))    // spin
+  let M: Float32Array
+  const pm = vertMix
+  if (pm > 0) {
+    // ruota verticale: centro in (cx, cy, cz), gira attorno al proprio asse, stessa faccia esposta
+    M = m4.translate(offX * (1 - pm) + cx * pm, cy * pm + height.value * (1 - pm), cz * pm)
+    M = m4.mul(M, m4.rotY(PINCH_TILT * pm))
+    M = m4.mul(M, m4.rotX(-Math.PI / 2 * (1 - pm)))
+    M = m4.mul(M, m4.rotX(flipAngle * (1 - pm)))
+    M = m4.mul(M, m4.rotZ(spin.value + twist * (1 - pm)))
+  } else {
+    M = m4.translate(offX + bx, height.value + by, offY + bz)
+    M = m4.mul(M, m4.rotX(-Math.PI / 2))         // piano del tessuto orizzontale
+    if (bank !== 0) M = m4.mul(M, m4.rotY(bank)) // boomerang: inclinato nella curva
+    M = m4.mul(M, m4.rotX(flipAngle))             // ribaltamento sull'altro lato
+    M = m4.mul(M, m4.rotX(nx)); M = m4.mul(M, m4.rotY(ny))   // nutazione
+    M = m4.mul(M, m4.rotZ(spin.value + twist))    // spin
+  }
   const MVP = m4.mul(m4.mul(P, V), M)
 
   /* punto d'appoggio (dito) espresso nel sistema del tessuto */
@@ -413,6 +570,10 @@ function render() {
   gl.uniform1f(uni.uReach, FINGER_REACH)
   gl.uniform1f(uni.uDroopSign, Math.cos(flipAngle))
   gl.uniform2f(uni.uSupport, sx, sy)
+  gl.uniform1f(uni.uPinchMix, pm)
+  gl.uniform1f(uni.uGather, pinchGather * pm)
+  gl.uniform1f(uni.uTwist, pinchTwist * pm)
+  gl.uniform2f(uni.uPinch, pinchPx, pinchPy)
   gl.activeTexture(gl.TEXTURE0); gl.bindTexture(gl.TEXTURE_2D, texFront)
   gl.activeTexture(gl.TEXTURE1); gl.bindTexture(gl.TEXTURE_2D, texBack)
   gl.drawElements(gl.TRIANGLES, indexCount, gl.UNSIGNED_SHORT, 0)
@@ -432,6 +593,8 @@ watch(throwHeightCm, () => render())
 const rpm = computed(() => Math.round(omega.value * 60 / (2 * Math.PI)))
 const status = computed(() => {
   if (!inHand.value) return `In volo · ${(height.value * 100).toFixed(0)} cm`
+  if (boomOn.value) return 'Boomerang · in volo, torna sul dito'
+  if (pinchOn.value) return `Pinch verticale · mano ${pinchHand > 0 ? 'destra' : 'sinistra'} · ${pinchPhase === 'pinch' ? 'pinza, frena ma non ferma' : 'lancio all\'altra mano'} · ${Math.round(pinchOmega.value * 60 / (2 * Math.PI))} rpm`
   if (fingerOn.value) return 'Giro di dito: il dito orbita sotto il tessuto'
   if (omega.value > SPREAD_OMEGA) return 'Spin stabile sul dito, tessuto teso'
   if (omega.value > 0) return 'Rallenta sul dito… flick (Spazio) o giro di dito (D)'
@@ -448,7 +611,7 @@ defineExpose({ flick, flip, reset })
         ref="canvasEl"
         class="gl"
         :style="{ width: '100%', height: stageH + 'px' }"
-        title="Click: flick + lancio · Shift+click: solo flick · D: giro di dito · F: gira lato"
+        title="Click: flick + lancio · Shift+click: solo flick · D: giro di dito · P: pinch verticale · B: boomerang · F: gira lato"
         @click="(e) => flick(!e.shiftKey)"
       />
       <p v-if="webglError" class="glerr">{{ webglError }}</p>
@@ -463,6 +626,8 @@ defineExpose({ flick, flip, reset })
       <button class="primary" :disabled="!inHand" @click="flick(true)">Flick + lancio</button>
       <button :disabled="!inHand" @click="flick(false)">Solo flick</button>
       <button :class="{ on: fingerOn }" @click="toggleFinger">Giro di dito (D)</button>
+      <button :class="{ on: pinchOn }" :disabled="!inHand" @click="togglePinch">Pinch verticale (P)</button>
+      <button :disabled="!inHand || boomOn || pinchOn" @click="boomerang">Boomerang (B)</button>
       <button @click="flip">Gira lato (F)</button>
       <button @click="reset">Reset</button>
     </div>
@@ -483,6 +648,9 @@ defineExpose({ flick, flip, reset })
       </label>
       <label>Raggio del giro di dito <span>{{ fingerRadiusCm }} cm</span>
         <input v-model.number="fingerRadiusCm" type="range" min="2" max="15" step="1">
+      </label>
+      <label>Velocità del pinch verticale <span>{{ pinchRevs.toFixed(1) }} giri/s</span>
+        <input v-model.number="pinchRevs" type="range" min="0.5" max="3" step="0.1">
       </label>
       <label>Stabilizzazione giroscopica <span>{{ stabilize.toFixed(1) }}×</span>
         <input v-model.number="stabilize" type="range" min="0.2" max="3" step="0.1">

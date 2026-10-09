@@ -102,7 +102,7 @@ const editorTitle = computed(() => editing.value ? (editing.value.side === 'fron
     <section class="main">
       <header class="top">
         <h2>{{ active?.name ?? (frontFile || backFile ? 'Anteprima' : 'Esempio') }}</h2>
-        <span class="muted">Click/Spazio = flick + lancio · D = giro di dito · F = gira lato</span>
+        <span class="muted">Click/Spazio = flick · D = giro di dito · P = pinch · B = boomerang · F = gira lato</span>
       </header>
       <DapoViewer :front="previewFront" :back="previewBack" />
     </section>
