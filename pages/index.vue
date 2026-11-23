@@ -176,6 +176,10 @@ const editorTitle = computed(() => editing.value ? (editing.value.side === 'fron
         <span class="muted">Click/Spazio = flick · D = giro di dito · P = pinch · B = boomerang · F = gira lato</span>
       </header>
       <DapoViewer :front="previewFront" :back="previewBack" />
+      <div class="panels">
+        <MotionPanel />
+        <LedPanel />
+      </div>
     </section>
 
     <DapoFrameEditor
@@ -268,6 +272,8 @@ h2 { margin: 0 0 0.8rem; font-size: 1rem; }
 .mini .del[title^="Incolla"]:hover { color: var(--accent-2); border-color: var(--accent-2); }
 
 .main { padding: 1.5rem; display: flex; flex-direction: column; gap: 1rem; }
+.panels { display: grid; grid-template-columns: 1.4fr 1fr; gap: 1rem; align-items: start; }
+@media (max-width: 1100px) { .panels { grid-template-columns: 1fr; } }
 .top { display: flex; align-items: baseline; justify-content: space-between; gap: 1rem; flex-wrap: wrap; }
 .top h2 { margin: 0; font-size: 1.2rem; }
 </style>

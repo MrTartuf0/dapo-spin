@@ -20,7 +20,8 @@ In arrivo: LED cuciti a raggi che reagiscono al movimento e un modello TinyML ch
 | **Dapo Lab**: 3D dal vivo, grafici, registrazione dataset, anteprima LED | `tools/dapo-lab` → `/lab` | ✅ funziona con la Demo e con i dati del firmware simulato |
 | **Aggiornamento firmware**: dal browser via Bluetooth, dal telefono, via USB | `/firmware`, `firmware/DapoIMU/DapoOTA.*` | ✅ testato in simulazione · ⏳ da provare sulla scheda |
 | **Sito e release**: deploy su Netlify, binari del firmware nelle Release | `.github/workflows/ci.yml` | ✅ |
-| **Dapo vero nel simulatore**: il design mosso dai dati reali, dal vivo o da registrazione | radice | ⏳ prossimo passo |
+| **Provare i design**: fisica, gesture predefinite, dapo vero via Bluetooth, registrazioni CSV | `components/MotionPanel.vue`, `composables/useMotion.ts` | ✅ |
+| **LED simulati sopra il design**, accesi o spenti a parte (raggi o bordo, 9 effetti) | `components/LedPanel.vue`, `utils/leds.ts` | ✅ |
 | **LED reattivi** e **TinyML** | `firmware/`, `data/` | ⏳ |
 
 Il lavoro da fare è nelle [issue](../../issues).
@@ -36,6 +37,20 @@ tests/firmware-sim/               test del firmware sul computer, con sensori si
 docs/                             hardware, LED, tessuto, formato dei dati
 data/                             dataset registrati con il Dapo Lab
 ```
+
+## Provare un design
+Carica fronte e retro nella barra a sinistra, poi scegli da dove arriva il movimento:
+
+| Movimento | Per chi | Cosa fa |
+|---|---|---|
+| **Fisica** | tutti | il modello fisico: flick, lancio, giro di dito, pinch verticale, boomerang |
+| **Gesture** | chi non ha la scheda | movimenti predefiniti che girano da soli: spin sul dito, flick e lancio, lancio con flip, wobble, ruota verticale, oppure tutti di fila |
+| **Dapo vero** | chi ha la dapo con la XIAO | i tuoi movimenti, dal vivo via Bluetooth (Chrome o Edge) |
+| **Registrazione** | tutti | un CSV del Dapo Lab, rigiocato con il design attivo (play, pausa, velocità) |
+
+I **LED** si accendono a parte, così lo stesso design si prova su una dapo con o senza luci:
+disposizione a raggi o sul bordo, nove effetti, diffusione nel tessuto e modalità "al buio".
+La logica degli effetti è in `utils/leds.ts`, uguale a quella del Dapo Lab.
 
 ## Il sito
 Ogni push su `main` (e ogni tag) pubblica il sito su Netlify; ogni pull request ha la sua anteprima,
