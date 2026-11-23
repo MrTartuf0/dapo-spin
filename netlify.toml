@@ -1,0 +1,14 @@
+# Il sito viene pubblicato dalla GitHub Action (.github/workflows/ci.yml, job "deploy"):
+# qui ci sono solo le regole lette da Netlify per i file già costruiti.
+
+# il firmware "ultima versione" non deve restare in cache: la pagina Firmware lo confronta con la scheda
+[[headers]]
+  for = "/firmware/*"
+  [headers.values]
+    Cache-Control = "no-cache"
+
+# app a pagina singola: qualsiasi percorso sconosciuto apre il simulatore
+[[redirects]]
+  from = "/*"
+  to = "/200.html"
+  status = 200

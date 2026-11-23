@@ -1,49 +1,88 @@
+# Una sola pipeline per tutto il progetto:
+#   firmware      compila DapoIMU per la XIAO e prepara i binari (.uf2, .zip, .bin, .hex)
+#   firmware-sim  test del firmware sul PC (orientamento + aggiornamento via Bluetooth)
+#   dapo-lab      ricostruisce tools/dapo-lab/dapo-lab.html e controlla che sia aggiornato
+#   site          build del simulatore + Dapo Lab in /lab + firmware in /firmware
+#   deploy        Netlify: produzione da main e dai tag, anteprima per ogni pull request
+#   release       sui tag v*: pagina Release con i binari del firmware
 name: CI
 
 on:
   push:
     branches: [main]
+    tags: ['v*']
   pull_request:
 
-jobs:
-  app:
-    name: Build simulatore (Nuxt)
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v5
-      - uses: actions/setup-node@v5
-        with:
-          node-version: 22
-          cache: npm
-      - run: npm ci
-      - run: npm run generate
+permissions:
+  contents: read
 
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
   firmware:
-    name: Compila firmware (XIAO nRF52840 Sense)
+    name: Firmware (XIAO nRF52840 Sense)
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v5
+        with:
+          fetch-depth: 0              # serve a git describe per la versione
       - uses: arduino/setup-arduino-cli@v2
       - name: Core Seeed mbed e librerie
         run: |
-          # il core di Seeed lo chiama per creare il pacchetto da caricare, ma su Linux non lo installa
+          # il core di Seeed lo chiama per creare il pacchetto DFU, ma su Linux non lo installa
           pipx install adafruit-nrfutil
           arduino-cli config init
           arduino-cli config add board_manager.additional_urls https://files.seeedstudio.com/arduino/package_seeeduino_boards_index.json
           arduino-cli core update-index
           arduino-cli core install Seeeduino:mbed
           arduino-cli lib install "Seeed Arduino LSM6DS3" ArduinoBLE
+      - name: Versione
+        run: |
+          V=$(git describe --tags --always --dirty 2>/dev/null || echo dev)
+          echo "VERSION=$V" >> "$GITHUB_ENV"
+          printf '// generato dalla CI\n#pragma once\n#define FW_VERSION "%s"\n' "$V" > firmware/DapoIMU/version.h
+          echo "Versione firmware: $V"
       - name: Compila
-        run: arduino-cli compile --fqbn Seeeduino:mbed:xiaonRF52840Sense --warnings default firmware/DapoIMU
+        run: arduino-cli compile --fqbn Seeeduino:mbed:xiaonRF52840Sense --warnings default --output-dir out firmware/DapoIMU
+      - name: Binari
+        run: |
+          mkdir -p dist tools-uf2
+          curl -fsSL -o tools-uf2/uf2conv.py https://raw.githubusercontent.com/microsoft/uf2/master/utils/uf2conv.py
+          curl -fsSL -o tools-uf2/uf2families.json https://raw.githubusercontent.com/microsoft/uf2/master/utils/uf2families.json
+          N="dapo-imu-$VERSION"
+          python3 tools-uf2/uf2conv.py out/DapoIMU.ino.hex --convert --family 0xADA52840 --output "dist/$N.uf2"
+          cp out/DapoIMU.ino.zip "dist/$N-dfu.zip"
+          cp out/DapoIMU.ino.bin "dist/$N.bin"
+          cp out/DapoIMU.ino.hex "dist/$N.hex"
+          SIZE=$(stat -c %s "dist/$N.bin")
+          CRC=$(python3 -c "import zlib,sys;print(zlib.crc32(open(sys.argv[1],'rb').read()))" "dist/$N.bin")
+          SHA=$(sha256sum "dist/$N.bin" | cut -d' ' -f1)
+          printf '{"version":"%s","file":"%s.bin","size":%s,"crc32":%s,"sha256":"%s","commit":"%s"}\n' \
+            "$VERSION" "$N" "$SIZE" "$CRC" "$SHA" "$GITHUB_SHA" > dist/firmware.json
+          cat dist/firmware.json
+          # l'aggiornamento dal browser ha posto per 405504 byte (vedi firmware/DapoIMU/DapoOTA.h)
+          if [ "$SIZE" -gt 405504 ]; then
+            echo "::warning::Firmware di $SIZE byte: troppo grande per l'aggiornamento dal browser (max 405504). Usa la modalità OTA del bootloader o l'USB."
+          fi
+          {
+            echo "### Firmware $VERSION"
+            echo "| File | Byte |"; echo "|---|---|"
+            for f in dist/*; do echo "| $(basename "$f") | $(stat -c %s "$f") |"; done
+          } >> "$GITHUB_STEP_SUMMARY"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: firmware
+          path: dist/
+          if-no-files-found: error
 
   firmware-sim:
     name: Test firmware simulato
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v5
-      - name: Compila ed esegui
-        working-directory: tests/firmware-sim
-        run: g++ -std=c++17 -O2 -Wall -Imock test_fusion.cpp -o test_fusion && ./test_fusion
+      - run: make -C tests/firmware-sim
 
   dapo-lab:
     name: Build Dapo Lab
@@ -61,3 +100,113 @@ jobs:
       - run: npm run build
       - name: dapo-lab.html è aggiornato?
         run: git diff --exit-code -- dapo-lab.html || (echo "::error::Ricostruisci con 'npm run build' e committa dapo-lab.html" && exit 1)
+
+  site:
+    name: Build sito (simulatore + Lab + firmware)
+    needs: [firmware, dapo-lab]
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-node@v5
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci
+      - run: npm run generate
+      - name: Dapo Lab in /lab
+        run: mkdir -p .output/public/lab && cp tools/dapo-lab/dapo-lab.html .output/public/lab/index.html
+      - uses: actions/download-artifact@v4
+        with:
+          name: firmware
+          path: .output/public/firmware
+      - name: Nomi fissi per la pagina Firmware
+        working-directory: .output/public/firmware
+        run: |
+          cp firmware.json latest.json
+          cp "$(python3 -c "import json;print(json.load(open('firmware.json'))['file'])")" latest.bin
+          ls -la
+      - uses: actions/upload-artifact@v4
+        with:
+          name: site
+          path: .output/public/
+          if-no-files-found: error
+
+  deploy:
+    name: Deploy su Netlify
+    needs: [site, firmware-sim]
+    runs-on: ubuntu-latest
+    # le PR da fork non hanno accesso ai segreti
+    if: github.event_name == 'push' || github.event.pull_request.head.repo.full_name == github.repository
+    permissions:
+      contents: read
+      pull-requests: write
+    env:
+      NETLIFY_AUTH_TOKEN: ${{ secrets.NETLIFY_AUTH_TOKEN }}
+      NETLIFY_SITE_ID: ${{ secrets.NETLIFY_SITE_ID }}
+    steps:
+      - uses: actions/checkout@v5      # per netlify.toml (redirect e header)
+      - uses: actions/download-artifact@v4
+        with:
+          name: site
+          path: site
+      - uses: actions/setup-node@v5
+        with:
+          node-version: 22
+      - name: Pubblica
+        id: netlify
+        run: |
+          if [ -z "$NETLIFY_AUTH_TOKEN" ] || [ -z "$NETLIFY_SITE_ID" ]; then
+            echo "::notice::Deploy saltato: aggiungi i segreti NETLIFY_AUTH_TOKEN e NETLIFY_SITE_ID (vedi README)."
+            exit 0
+          fi
+          MSG="${GITHUB_SHA::7} ${{ github.event_name }}"
+          if [ "${{ github.event_name }}" = "pull_request" ]; then
+            ARGS="--alias pr-${{ github.event.pull_request.number }}"
+          else
+            ARGS="--prod"
+          fi
+          npx --yes netlify-cli@27 deploy --dir site --site "$NETLIFY_SITE_ID" --auth "$NETLIFY_AUTH_TOKEN" \
+            --message "$MSG" $ARGS --json > deploy.json
+          URL=$(python3 -c "import json;d=json.load(open('deploy.json'));print(d.get('url') if '--prod' in '$ARGS' else d.get('deploy_url'))")
+          echo "url=$URL" >> "$GITHUB_OUTPUT"
+          echo "### Sito pubblicato: $URL" >> "$GITHUB_STEP_SUMMARY"
+      - name: Link nella pull request
+        if: github.event_name == 'pull_request' && steps.netlify.outputs.url != ''
+        env:
+          GH_TOKEN: ${{ github.token }}
+          URL: ${{ steps.netlify.outputs.url }}
+        run: |
+          BODY="🌐 Anteprima del sito: $URL · [Lab]($URL/lab/) · [Firmware]($URL/firmware)"
+          gh pr comment ${{ github.event.pull_request.number }} --repo "$GITHUB_REPOSITORY" --edit-last --body "$BODY" \
+            || gh pr comment ${{ github.event.pull_request.number }} --repo "$GITHUB_REPOSITORY" --body "$BODY"
+
+  release:
+    name: Release del firmware
+    needs: [firmware, firmware-sim]
+    if: startsWith(github.ref, 'refs/tags/v')
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          name: firmware
+          path: dist
+      - name: Crea la release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ github.ref_name }}
+        run: |
+          cat > notes.md <<EOF
+          ## Quale file mi serve?
+          | File | Per |
+          |---|---|
+          | \`dapo-imu-$TAG.uf2\` | **USB**, anche la prima volta: doppio tocco su reset, compare il disco *XIAO-SENSE*, ci trascini il file |
+          | \`dapo-imu-$TAG.bin\` | **Bluetooth dal browser**: pagina *Firmware* del sito (la versione del sito c'è già) |
+          | \`dapo-imu-$TAG-dfu.zip\` | **Bluetooth dal telefono**: modalità OTA del bootloader + app nRF Connect |
+          | \`dapo-imu-$TAG.hex\` | programmatori e strumenti di sviluppo |
+          | \`firmware.json\` | versione, dimensione, CRC32 e SHA-256 del .bin |
+
+          EOF
+          gh release create "$TAG" dist/* --repo "$GITHUB_REPOSITORY" --title "DapoIMU $TAG" \
+            --notes-file notes.md --generate-notes --verify-tag

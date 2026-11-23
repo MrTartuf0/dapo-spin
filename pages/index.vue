@@ -117,7 +117,8 @@ const editorTitle = computed(() => editing.value ? (editing.value.side === 'fron
 <template>
   <main class="layout">
     <aside class="sidebar">
-      <h1>Dapo Spin</h1>
+      <AppNav />
+      <h1>Dapo Twin</h1>
       <p class="hint">Carica un'immagine per lato (SVG, PNG, JPG…): la posizioni nella cornice e viene rasterizzata nella forma del dapo.</p>
 
       <section class="card">
