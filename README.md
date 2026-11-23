@@ -1,5 +1,11 @@
 # ✦ Dapo Twin
 
+[![CI](https://github.com/MrTartuf0/dapo-spin/actions/workflows/ci.yml/badge.svg)](https://github.com/MrTartuf0/dapo-spin/actions/workflows/ci.yml)
+[![Sito](https://img.shields.io/badge/sito-dapo--twin.netlify.app-4fd1c5)](https://dapo-twin.netlify.app)
+[![Firmware](https://img.shields.io/github/v/release/MrTartuf0/dapo-spin?label=firmware)](https://github.com/MrTartuf0/dapo-spin/releases/latest)
+
+**Prova online: https://dapo-twin.netlify.app** · [Firmware](https://dapo-twin.netlify.app/firmware) · [Lab](https://dapo-twin.netlify.app/lab/) · [Release del firmware](https://github.com/MrTartuf0/dapo-spin/releases)
+
 La dapo (la stella di stoffa a 8 punte che si fa girare sul dito) e il suo gemello digitale.
 Carichi un design, lo guardi girare nel simulatore con flick, lanci e trick; poi prendi la **dapo vera**,
 con dentro una Seeed XIAO nRF52840 Sense, e sono i tuoi movimenti reali a muovere il design sullo schermo.
@@ -11,7 +17,9 @@ In arrivo: LED cuciti a raggi che reagiscono al movimento e un modello TinyML ch
 |---|---|---|
 | **Simulatore**: design fronte/retro, fisica di flick, lancio, pinch, boomerang | radice (Nuxt 3) | ✅ |
 | **Firmware IMU**: orientamento, invio dati via USB e Bluetooth | `firmware/DapoIMU` | ✅ compila e passa il test simulato · ⏳ da provare sulla scheda |
-| **Dapo Lab**: 3D dal vivo, grafici, registrazione dataset, anteprima LED | `tools/dapo-lab` | ✅ funziona con la Demo e con i dati del firmware simulato |
+| **Dapo Lab**: 3D dal vivo, grafici, registrazione dataset, anteprima LED | `tools/dapo-lab` → `/lab` | ✅ funziona con la Demo e con i dati del firmware simulato |
+| **Aggiornamento firmware**: dal browser via Bluetooth, dal telefono, via USB | `/firmware`, `firmware/DapoIMU/DapoOTA.*` | ✅ testato in simulazione · ⏳ da provare sulla scheda |
+| **Sito e release**: deploy su Netlify, binari del firmware nelle Release | `.github/workflows/ci.yml` | ✅ |
 | **Dapo vero nel simulatore**: il design mosso dai dati reali, dal vivo o da registrazione | radice | ⏳ prossimo passo |
 | **LED reattivi** e **TinyML** | `firmware/`, `data/` | ⏳ |
 
@@ -20,7 +28,7 @@ Il lavoro da fare è nelle [issue](../../issues).
 ## Struttura
 
 ```
-pages/ components/ composables/   simulatore Nuxt (WebGL puro)
+pages/ components/ composables/   sito Nuxt: simulatore (/) e aggiornamento firmware (/firmware)
 public/designs/                   design di default
 firmware/DapoIMU/                 sketch Arduino per la XIAO (IMU, filtro di orientamento, USB + BLE)
 tools/dapo-lab/                   strumento per la scheda: dapo-lab.html pronto da aprire + sorgenti
@@ -28,6 +36,35 @@ tests/firmware-sim/               test del firmware sul computer, con sensori si
 docs/                             hardware, LED, tessuto, formato dei dati
 data/                             dataset registrati con il Dapo Lab
 ```
+
+## Il sito
+Ogni push su `main` (e ogni tag) pubblica il sito su Netlify; ogni pull request ha la sua anteprima,
+con il link scritto nei commenti della PR.
+
+| Percorso | Cosa c'è |
+|---|---|
+| `/` | simulatore: design, fisica, trick |
+| `/firmware` | aggiornare la dapo: Bluetooth dal browser, telefono (bootloader), USB |
+| `/lab/` | Dapo Lab |
+| `/firmware/latest.json`, `latest.bin`, `*.uf2`, `*-dfu.zip` | il firmware costruito dallo stesso commit del sito |
+
+### Configurare Netlify (una volta)
+1. Su Netlify: **Add new site → Deploy manually**, trascina una cartella qualsiasi, poi in *Site configuration*
+   rinomina il sito in `dapo-twin` (se il nome è preso, aggiorna i link di questo README).
+2. Copia il **Site ID** (*Site configuration → General*) e crea un **Personal access token**
+   (*User settings → Applications*).
+3. Su GitHub: *Settings → Secrets and variables → Actions* → aggiungi `NETLIFY_SITE_ID` e `NETLIFY_AUTH_TOKEN`.
+4. Su GitHub, nella pagina del repo: ⚙️ accanto ad *About* → *Website* = `https://dapo-twin.netlify.app`.
+
+Senza i segreti la CI fa tutto il resto e salta solo la pubblicazione.
+
+### Pubblicare una versione del firmware
+```bash
+git tag v0.2.0 && git push origin v0.2.0
+```
+La CI compila con la versione `v0.2.0`, crea la [Release](https://github.com/MrTartuf0/dapo-spin/releases)
+con `.uf2` (USB), `.bin` (browser), `-dfu.zip` (telefono), `.hex` e `firmware.json`, e pubblica il sito
+con quel firmware nella pagina `/firmware`.
 
 ## Avvio
 
@@ -46,7 +83,12 @@ npm run generate   # build statica in .output/public
 3. Gestore librerie: **Seeed Arduino LSM6DS3** (non *Arduino_LSM6DS3*) e **ArduinoBLE**.
 4. Carica `firmware/DapoIMU/DapoIMU.ino`. All'accensione tieni la dapo ferma ~1 s (LED rosso = calibrazione).
 
-LED della scheda: rosso = calibrazione, verde lampeggiante = in attesa, blu = Bluetooth connesso.
+Senza Arduino IDE: scarica il `.uf2` dalla [Release](https://github.com/MrTartuf0/dapo-spin/releases/latest),
+tocca due volte il reset della XIAO e trascina il file sul disco `XIAO-SENSE`. Da lì in poi si aggiorna
+anche senza cavo, dalla pagina `/firmware` del sito.
+
+LED della scheda: rosso = calibrazione, verde lampeggiante = in attesa, blu = Bluetooth connesso,
+viola lampeggiante = aggiornamento in corso.
 
 ### Dapo Lab
 Apri `tools/dapo-lab/dapo-lab.html` con **Chrome o Edge** su computer e premi **USB** o **Bluetooth**
@@ -56,15 +98,17 @@ file aperto dal disco: `cd tools/dapo-lab && python3 -m http.server` e apri `htt
 ## Sviluppo
 
 ```bash
-# test del firmware con sensori simulati (spin a 3 giri/s, centrifuga, rumore, bias)
-cd tests/firmware-sim && g++ -std=c++17 -O2 -Imock test_fusion.cpp -o test_fusion && ./test_fusion
+# test del firmware sul PC: orientamento (spin a 3 giri/s, centrifuga, rumore, bias)
+# e aggiornamento via Bluetooth (pacchetti persi, CRC, copia, impostazioni del bootloader)
+make -C tests/firmware-sim
 
 # dopo aver modificato tools/dapo-lab/src/ ricostruisci la pagina
 cd tools/dapo-lab && npm install && npm run build
 ```
 
-La CI (GitHub Actions) su ogni pull request e su `main` fa la build del simulatore, compila il firmware
-per la XIAO, esegue il test simulato e controlla che `dapo-lab.html` sia aggiornato.
+La CI (GitHub Actions, `.github/workflows/ci.yml`) su ogni pull request, su `main` e sui tag:
+compila il firmware e prepara i binari, esegue i test simulati, ricostruisce il Dapo Lab, fa la build del
+sito, lo pubblica su Netlify e, sui tag `v*`, crea la Release del firmware.
 
 ## Documentazione
 - [Hardware, LED e tessuto](docs/hardware.md)

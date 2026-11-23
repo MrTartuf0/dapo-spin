@@ -7,3 +7,4 @@ tests/firmware-sim/test_fusion
 *.hex
 *.elf
 .DS_Store
+tests/firmware-sim/test_ota

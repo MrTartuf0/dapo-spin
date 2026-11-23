@@ -21,6 +21,17 @@ il resto del tempo integra il giroscopio in modo esatto. Il bias del giroscopio 
 riaggiusta da solo quando la dapo è ferma. Nel test simulato (10 s a 3 giri/s, scheda a 5 cm dal centro)
 l'errore d'inclinazione resta sotto 1°.
 
+### Flash e aggiornamenti
+| Indirizzi | Contenuto |
+|---|---|
+| 0x00000 – 0x27000 | MBR e spazio della SoftDevice (gestiti dal bootloader) |
+| 0x27000 – 0x8A000 | firmware DapoIMU (max 396 KB; oggi circa 343 KB) |
+| 0x8A000 – 0xED000 | staging per l'aggiornamento via Bluetooth dal browser |
+| 0xF4000 – 0x100000 | bootloader Adafruit (UF2, seriale, OTA), impostazioni a 0xFF000 |
+
+Se il firmware supera 396 KB (per esempio con un modello TinyML grosso) l'aggiornamento dal browser
+non ci sta più: restano la modalità OTA del bootloader (comando `u` + nRF Connect) e l'USB (`.uf2`).
+
 ## Disposizione: LED a raggi
 - **8 raggi** verso le punte, da ~7 cm a ~30 cm dal centro, 16 LED per raggio (≈ 65 LED/m) → 128 LED, ~2 m di striscia.
 - Il **centro resta libero** per il dito. Scheda e batteria su un anello a ~5 cm, **da parti opposte** per il bilanciamento.

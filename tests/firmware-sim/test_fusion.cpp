@@ -5,7 +5,7 @@
 // Controlla che l'orientamento stimato segua quello vero e che i dati in uscita
 // (seriale e BLE) abbiano il formato atteso.
 //
-//   g++ -std=c++17 -O2 -Imock test_fusion.cpp -o test_fusion && ./test_fusion
+//   make            (oppure: make test_fusion && ./test_fusion)
 
 #include "Arduino.h"
 #include "ArduinoBLE.h"
@@ -14,6 +14,8 @@
 uint64_t g_simUs = 0;
 MockSerial Serial;
 MockBLE BLE;
+uint8_t g_flash[0x100000];      // flash finta per DapoOTA.cpp
+bool g_swapCalled = false;
 #include "../../firmware/DapoIMU/DapoIMU.ino"
 
 struct Qd { double w, x, y, z; };
@@ -88,9 +90,9 @@ int main() {
     else if (line.rfind("#", 0) != 0) bad++;
   }
   check(nData > 1600 && bad == 0, "righe seriali ben formate (numero)", nData);
-  bool bleOkLen = !dataChar.sent.empty();
-  for (auto& p : dataChar.sent) if (p.size() != 20) bleOkLen = false;
-  check(bleOkLen && dataChar.sent.size() > 800, "pacchetti BLE da 20 byte (numero)", (double)dataChar.sent.size());
+  bool bleOkLen = !dataChar.sent->empty();
+  for (auto& p : *dataChar.sent) if (p.size() != 20) bleOkLen = false;
+  check(bleOkLen && dataChar.sent->size() > 800, "pacchetti BLE da 20 byte (numero)", (double)dataChar.sent->size());
 
   Serial.in = "r"; loop();
   check(tiltErrorDeg() < 1.0, "comando 'r' (livella) (errore °)", tiltErrorDeg());

@@ -19,6 +19,9 @@
        * Bluetooth LE "DapoIMU": pacchetti da 20 byte a 50 Hz (vedi sendBle())
    - comandi (da seriale o BLE):  'c' = ricalibra giroscopio (tienila ferma)
                                   'r' = reset orientamento (livella con la gravità)
+                                  'v' = scrive la versione del firmware
+                                  'u' = riavvia nel bootloader in modalità OTA (app nRF Connect)
+   - aggiornamento del firmware dal browser via Bluetooth: DapoOTA.h, pagina /firmware del sito
 
   LED sulla scheda:  rosso = calibrazione,  blu = BLE connesso,  verde lampeggiante = in attesa
   Assi: quelli stampati dall'IMU. Con la scheda appoggiata a faccia in su, az ≈ +1 g.
@@ -30,6 +33,8 @@
 #include <Wire.h>
 #include <LSM6DS3.h>
 #include <ArduinoBLE.h>
+#include "version.h"
+#include "DapoOTA.h"
 
 // ---------------- impostazioni ----------------
 const uint32_t IMU_PERIOD_US    = 2400;   // ~416 Hz, come l'ODR del sensore
@@ -51,6 +56,7 @@ LSM6DS3 imu(I2C_MODE, 0x6A);
 BLEService        imuService(SVC_UUID);
 BLECharacteristic dataChar(DATA_UUID, BLERead | BLENotify, 20, true);
 BLECharacteristic cmdChar(CMD_UUID, BLEWrite | BLEWriteWithoutResponse, 4);
+BLECharacteristic infoChar("a7f3c103-5d2e-4f8b-9e61-3c0d7b2a9e10", BLERead, 96);
 bool bleOk = false;
 
 // ---------------- stato ----------------
@@ -254,6 +260,12 @@ void sendBle() {
 void handleCommand(char c) {
   if (c == 'c') calibrateGyro();
   else if (c == 'r') levelFromAccel();
+  else if (c == 'v' && Serial) { Serial.print("# firmware "); Serial.println(FW_VERSION); }
+  else if (c == 'u') {
+    if (Serial) Serial.println("# riavvio nel bootloader OTA: aggiorna con nRF Connect");
+    delay(100);
+    dapo_ota::enterBootloaderOta();
+  }
 }
 
 // ---------------- setup / loop ----------------
@@ -296,7 +308,16 @@ void setup() {
     BLE.setConnectionInterval(6, 12);          // 7.5–15 ms, se il PC lo concede
     imuService.addCharacteristic(dataChar);
     imuService.addCharacteristic(cmdChar);
+    imuService.addCharacteristic(infoChar);
     BLE.addService(imuService);
+    dapo_ota::begin();
+    BLE.addService(dapo_ota::service);
+    {
+      char info[96];
+      snprintf(info, sizeof info, "{\"fw\":\"%s\",\"ota\":%lu,\"board\":\"xiao-nrf52840-sense\"}",
+               FW_VERSION, (unsigned long)dapo_ota::maxImageSize());
+      infoChar.writeValue((const uint8_t*)info, strlen(info));
+    }
     BLE.setAdvertisedService(imuService);
     BLE.advertise();
     bleOk = true;
@@ -305,6 +326,7 @@ void setup() {
     Serial.println("# BLE non partito, continuo solo con USB");
   }
 
+  if (Serial) { Serial.print("# DapoIMU "); Serial.println(FW_VERSION); }
   if (Serial) Serial.println("# formato: D,ms,ax,ay,az,gx,gy,gz,qw,qx,qy,qz  (g, gradi/s, quaternione)");
   tImu = tSerial = tBle = micros();
 }
@@ -329,7 +351,9 @@ void loop() {
 
   if (bleOk) {
     BLE.poll();
-    if (now - tBle >= BLE_PERIOD_US) { tBle = now; sendBle(); }
+    dapo_ota::poll();
+    // durante un aggiornamento il Bluetooth serve tutto al firmware nuovo
+    if (now - tBle >= BLE_PERIOD_US) { tBle = now; if (!dapo_ota::busy()) sendBle(); }
     if (cmdChar.written() && cmdChar.valueLength() > 0) handleCommand((char)cmdChar.value()[0]);
   }
 
@@ -337,7 +361,8 @@ void loop() {
 
   // LED di stato
   uint32_t ms = millis();
-  if (bleOk && BLE.connected()) setLed(false, false, true);
+  if (bleOk && dapo_ota::busy()) setLed((ms / 120) % 2, false, (ms / 120) % 2);   // viola lampeggiante: aggiornamento
+  else if (bleOk && BLE.connected()) setLed(false, false, true);
   else if (ms - tLed > 1000) { tLed = ms; setLed(false, true, false); }
   else if (ms - tLed > 60)   setLed(false, false, false);
 }
