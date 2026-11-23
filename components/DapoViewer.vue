@@ -1,4 +1,6 @@
 <script setup lang="ts">
+import type { MotionPose } from '~/composables/useMotion'
+import type { Led } from '~/utils/leds'
 /**
  * Simulatore fisico del dapo — rendering WebGL (nessuna dipendenza).
  *
@@ -86,9 +88,43 @@ const clamp = (v: number, a = 0, b = 1) => Math.min(b, Math.max(a, v))
 let raf = 0
 let last = 0
 
+/* movimento da fuori (gesture, dapo vero, file) e LED simulati */
+const motion = useMotion()
+const ledSet = useLedSettings()
+const external = computed(() => motion.mode.value !== 'fisica')
+let extPose: MotionPose | null = null
+let extSpread = 0, extSag = 0
+let lastImpactT = -1e9               // s: ultima presa/colpo, per gli effetti LED
+const extRpm = ref(0)
+const extInFlight = ref(false)
+
+/** un fotogramma con il movimento esterno: niente fisica, solo deformazione del tessuto */
+function stepExternal(now: number, dt: number) {
+  extPose = motion.pose(now)
+  if (extPose) {
+    const p = extPose
+    const wz = Math.abs(p.g[2]) * Math.PI / 180
+    const target = p.inFlight ? 1 : clamp(wz / SPREAD_OMEGA)
+    extSpread += (target - extSpread) * Math.min(1, dt * (target > extSpread ? 7 : 3))
+    const an = Math.hypot(p.a[0], p.a[1], p.a[2])
+    if (an > 2.5 && now / 1000 - lastImpactT > 0.3) { lastImpactT = now / 1000; extSag = Math.min(1.2, extSag + 0.45) }
+    extRpm.value = Math.round(p.g[2] / 6)
+    extInFlight.value = p.inFlight
+  }
+  extSag *= Math.exp(-3.2 * dt)
+}
+
 function step(now: number) {
   const dt = Math.max(0, Math.min(0.033, (now - last) / 1000))
   last = now
+
+  if (external.value) {
+    stepExternal(now, dt)
+    render(now)
+    raf = requestAnimationFrame(step)
+    return
+  }
+  extPose = null
 
   /* flick del polso */
   if (flickT >= 0) {
@@ -118,6 +154,7 @@ function step(now: number) {
     if (height.value <= 0) {
       const impact = Math.abs(vy)
       height.value = 0; vy = 0; inHand.value = true
+      lastImpactT = now / 1000
       sag.value = Math.min(1.2, sag.value + impact * 0.22)
       wobbleAmp.value = Math.min(0.5, wobbleAmp.value + impact * 0.07)
       omega.value *= 0.9
@@ -231,9 +268,9 @@ function step(now: number) {
   flipAngle += (flipTarget - flipAngle) * Math.min(1, dt * 9)
   if (Math.abs(flipTarget - flipAngle) < 0.001) flipAngle = flipTarget
 
-  render()
+  render(now)
 
-  const alive = omega.value > 0 || !inHand.value || flickT >= 0 || flipAngle !== flipTarget ||
+  const alive = ledSet.on.value || omega.value > 0 || !inHand.value || flickT >= 0 || flipAngle !== flipTarget ||
     fingerAmt.value > 0.001 || Math.abs(handTwist) > 0.001 || sag.value > 0.001 ||
     wobbleAmp.value > 0.001 || Math.abs(spread.value - target) > 0.002 ||
     Math.abs(offX - tx) + Math.abs(offY - ty) > 1e-4 || pinchOn.value || boomOn.value || boomMix > 0.001 || vertMix > 0 || Math.abs(pinchOmega.value) > 0.01 || pinchGather > 0.001 || fingerActive
@@ -241,6 +278,8 @@ function step(now: number) {
 }
 
 function start() { if (!raf) { last = performance.now(); raf = requestAnimationFrame(step) } }
+watch(() => motion.mode.value, () => start())
+watch(() => ledSet.on.value, () => start())
 function flick(withThrow = true) {
   if (!inHand.value || flickT >= 0) return
   pinchOn.value = false; boomOn.value = false
@@ -284,7 +323,8 @@ function reset() {
   render()
 }
 function onKey(e: KeyboardEvent) {
-  if (e.target instanceof HTMLInputElement) return
+  if (e.target instanceof HTMLInputElement || e.target instanceof HTMLSelectElement) return
+  if (external.value) return
   if (e.code === 'Space') { e.preventDefault(); flick(true) }
   if (e.key.toLowerCase() === 'f') flip()
   if (e.key.toLowerCase() === 'd') toggleFinger()
@@ -305,6 +345,9 @@ let uni: Record<string, WebGLUniformLocation | null> = {}
 let indexCount = 0
 let texFront: WebGLTexture | null = null
 let texBack: WebGLTexture | null = null
+let texLeds: WebGLTexture | null = null
+let ledCanvas: HTMLCanvasElement | null = null
+let ledCache: { layout: string; leds: Led[]; colors: [number, number, number][] } | null = null
 let hasDeriv = false
 let ro: ResizeObserver | null = null
 const webglError = ref('')
@@ -363,8 +406,8 @@ void main() {
 const FS = (deriv: boolean) => `
 ${deriv ? '#extension GL_OES_standard_derivatives : enable' : ''}
 precision mediump float;
-uniform sampler2D uFront, uBack;
-uniform float uHalfSide;
+uniform sampler2D uFront, uBack, uLeds;
+uniform float uHalfSide, uLedOn, uNight;
 varying vec2 vUv;
 varying vec2 vLocal;
 varying float vShade;
@@ -383,7 +426,10 @@ void main() {
   if (a <= 0.003) discard;
   vec4 col = gl_FrontFacing ? texture2D(uFront, vUv) : texture2D(uBack, vec2(vUv.x, 1.0 - vUv.y));
   if (col.a < 0.02) discard;
-  gl_FragColor = vec4(col.rgb * vShade, col.a * a);
+  vec3 base = col.rgb * vShade * (1.0 - 0.8 * uNight);
+  // luce dei LED: stessa posizione sul tessuto da tutte e due le facce
+  vec3 glow = uLedOn > 0.5 ? texture2D(uLeds, vUv).rgb * 1.35 : vec3(0.0);
+  gl_FragColor = vec4(base + glow, col.a * a);
 }`
 
 function compile(type: number, src: string) {
@@ -406,7 +452,7 @@ function initGL() {
   gl.linkProgram(prog)
   if (!gl.getProgramParameter(prog, gl.LINK_STATUS)) throw new Error(gl.getProgramInfoLog(prog) || 'link')
   gl.useProgram(prog)
-  for (const n of ['uMVP', 'uModel', 'uSpread', 'uSag', 'uReach', 'uDroopK', 'uDroopSign', 'uR', 'uSupport', 'uFront', 'uBack', 'uHalfSide', 'uPinchMix', 'uGather', 'uSigma', 'uTwist', 'uPinch'])
+  for (const n of ['uMVP', 'uModel', 'uSpread', 'uSag', 'uReach', 'uDroopK', 'uDroopSign', 'uR', 'uSupport', 'uFront', 'uBack', 'uHalfSide', 'uPinchMix', 'uGather', 'uSigma', 'uTwist', 'uPinch', 'uLeds', 'uLedOn', 'uNight'])
     uni[n] = gl.getUniformLocation(prog, n)
 
   /* mesh: griglia N×N sul quadrato [-R, R]² */
@@ -440,7 +486,8 @@ function initGL() {
   gl.uniform1f(uni.uSigma, 0.07)
   gl.uniform1i(uni.uFront, 0)
   gl.uniform1i(uni.uBack, 1)
-  texFront = makeTexture(); texBack = makeTexture()
+  gl.uniform1i(uni.uLeds, 2)
+  texFront = makeTexture(); texBack = makeTexture(); texLeds = makeTexture()
 }
 
 function makeTexture() {
@@ -490,6 +537,15 @@ const m4 = {
   rotX(a: number) { const c = Math.cos(a), s = Math.sin(a); return new Float32Array([1, 0, 0, 0, 0, c, s, 0, 0, -s, c, 0, 0, 0, 0, 1]) as M4 },
   rotY(a: number) { const c = Math.cos(a), s = Math.sin(a); return new Float32Array([c, 0, -s, 0, 0, 1, 0, 0, s, 0, c, 0, 0, 0, 0, 1]) as M4 },
   rotZ(a: number) { const c = Math.cos(a), s = Math.sin(a); return new Float32Array([c, s, 0, 0, -s, c, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1]) as M4 },
+  /** rotazione da quaternione [w,x,y,z] */
+  fromQuat(q: number[]) {
+    const [w, x, y, z] = q
+    return new Float32Array([
+      1 - 2 * (y * y + z * z), 2 * (x * y + w * z), 2 * (x * z - w * y), 0,
+      2 * (x * y - w * z), 1 - 2 * (x * x + z * z), 2 * (y * z + w * x), 0,
+      2 * (x * z + w * y), 2 * (y * z - w * x), 1 - 2 * (x * x + y * y), 0,
+      0, 0, 0, 1]) as M4
+  },
   perspective(fovy: number, aspect: number, near: number, far: number) {
     const f = 1 / Math.tan(fovy / 2), nf = 1 / (near - far)
     return new Float32Array([f / aspect, 0, 0, 0, 0, f, 0, 0, 0, 0, (far + near) * nf, -1, 0, 0, 2 * far * near * nf, 0]) as M4
@@ -515,19 +571,39 @@ function resize() {
   gl.viewport(0, 0, w, h)
 }
 
-function render() {
+/** aggiorna la texture con la luce dei LED. rot: tessuto → mondo con Z in alto (3×3 per righe) */
+function updateLedTexture(rot: number[], t: number, rpm: number, inFlight: boolean) {
+  if (!gl || !texLeds) return
+  if (!ledCanvas) { ledCanvas = document.createElement('canvas'); ledCanvas.width = ledCanvas.height = 512 }
+  if (!ledCache || ledCache.layout !== ledSet.layout.value) {
+    const leds = makeLayout(ledSet.layout.value, R)
+    ledCache = { layout: ledSet.layout.value, leds, colors: leds.map(() => [0, 0, 0]) }
+  }
+  const { leds, colors } = ledCache
+  updateWorld(leds, rot)
+  const ctx = { rpm, inFlight, sinceImpact: t - lastImpactT, R }
+  for (const d of leds) colors[d.i] = ledEffect(ledSet.effect.value, d, t, ctx)
+  paintLeds(ledCanvas.getContext('2d')!, leds, colors, R, ledSet.diffuseCm.value / 100)
+  gl.activeTexture(gl.TEXTURE2)
+  gl.bindTexture(gl.TEXTURE_2D, texLeds)
+  gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA, gl.RGBA, gl.UNSIGNED_BYTE, ledCanvas)
+}
+
+function render(now = performance.now()) {
   if (!gl || !prog) return
   resize()
   const c = canvasEl.value!
   const aspect = c.width / c.height
 
   /* camera: inquadra il dapo al 62 % della larghezza, con spazio sopra per il lancio */
+  const ext = external.value ? extPose : null
   const fovy = 38 * Math.PI / 180
   const tanH = Math.tan(fovy / 2) * aspect
-  const dist = Math.max(1.2, (DIAMETER / 0.56) / (2 * tanH)) * (1 + 0.45 * vertMix + 0.75 * boomMix)
+  const dist = ext ? Math.max(1.05, (DIAMETER / 0.56) / (2 * tanH)) * 0.98
+    : Math.max(1.2, (DIAMETER / 0.56) / (2 * tanH)) * (1 + 0.45 * vertMix + 0.75 * boomMix)
   // dall'alto per il dapo sul dito, quasi frontale per la ruota verticale
-  const el = (36 * (1 - vertMix) + 14 * vertMix) * Math.PI / 180
-  const targetY = (-0.04 + throwHeightCm.value / 100 * 0.42) * (1 - vertMix) + 0.5 * vertMix + 0.45 * boomMix
+  const el = ext ? 32 * Math.PI / 180 : (36 * (1 - vertMix) + 14 * vertMix) * Math.PI / 180
+  const targetY = ext ? 0.1 : (-0.04 + throwHeightCm.value / 100 * 0.42) * (1 - vertMix) + 0.5 * vertMix + 0.45 * boomMix
   const eye = [0, targetY + dist * Math.sin(el), dist * Math.cos(el)]
   const P = m4.perspective(fovy, aspect, 0.1, 20)
   const V = m4.lookAt(eye, [0, targetY, 0], [0, 1, 0])
@@ -537,8 +613,13 @@ function render() {
   const ny = wobbleAmp.value * Math.cos(wobblePhase)
   const twist = inHand.value ? handTwist * 0.4 : 0
   let M: Float32Array
-  const pm = vertMix
-  if (pm > 0) {
+  const pm = ext ? 0 : vertMix
+  if (ext) {
+    // movimento vero o registrato: il quaternione della scheda porta il tessuto nel mondo (Z in alto)
+    M = m4.translate(0, ext.height, 0)
+    M = m4.mul(M, m4.rotX(-Math.PI / 2))
+    M = m4.mul(M, m4.fromQuat(ext.q))
+  } else if (pm > 0) {
     // ruota verticale: centro in (cx, cy, cz), gira attorno al proprio asse, stessa faccia esposta
     M = m4.translate(offX * (1 - pm) + cx * pm, cy * pm + height.value * (1 - pm), cz * pm)
     M = m4.mul(M, m4.rotY(PINCH_TILT * pm))
@@ -555,20 +636,36 @@ function render() {
   }
   const MVP = m4.mul(m4.mul(P, V), M)
 
+  /* LED: rotazione tessuto → mondo con Z in alto, ricavata dalla matrice del modello */
+  if (ledSet.on.value) {
+    const rot = [M[0], M[4], M[8], -M[2], -M[6], -M[10], M[1], M[5], M[9]]
+    const rpmNow = ext ? ext.g[2] / 6 : (pm > 0 ? pinchOmega.value : omega.value) * 60 / (2 * Math.PI)
+    updateLedTexture(rot, now / 1000, rpmNow, ext ? ext.inFlight : !inHand.value)
+  }
+
   /* punto d'appoggio (dito) espresso nel sistema del tessuto */
-  const e = fingerAmt.value * fingerRadiusCm.value / 100
+  const e = ext ? 0 : fingerAmt.value * fingerRadiusCm.value / 100
   const fx = Math.cos(fingerPhase) * e - offX, fy = Math.sin(fingerPhase) * e - offY
   const cs = Math.cos(-spin.value), sn = Math.sin(-spin.value)
   const sx = fx * cs - fy * sn, sy = fx * sn + fy * cs
 
-  gl.clearColor(0.08, 0.09, 0.12, 1)
+  const dark = ledSet.night.value
+  gl.clearColor(dark ? 0.025 : 0.08, dark ? 0.028 : 0.09, dark ? 0.04 : 0.12, 1)
   gl.clear(gl.COLOR_BUFFER_BIT | gl.DEPTH_BUFFER_BIT)
   gl.uniformMatrix4fv(uni.uMVP, false, MVP)
   gl.uniformMatrix4fv(uni.uModel, false, M)
-  gl.uniform1f(uni.uSpread, inHand.value ? spread.value : 1)
-  gl.uniform1f(uni.uSag, sag.value)
+  if (ext) {
+    // il tessuto pende verso il basso quanto la sua normale guarda in alto (0 se è verticale)
+    const zUp = 1 - 2 * (ext.q[1] * ext.q[1] + ext.q[2] * ext.q[2])
+    gl.uniform1f(uni.uSpread, extSpread)
+    gl.uniform1f(uni.uSag, extSag)
+    gl.uniform1f(uni.uDroopSign, zUp)
+  } else {
+    gl.uniform1f(uni.uSpread, inHand.value ? spread.value : 1)
+    gl.uniform1f(uni.uSag, sag.value)
+    gl.uniform1f(uni.uDroopSign, Math.cos(flipAngle))
+  }
   gl.uniform1f(uni.uReach, FINGER_REACH)
-  gl.uniform1f(uni.uDroopSign, Math.cos(flipAngle))
   gl.uniform2f(uni.uSupport, sx, sy)
   gl.uniform1f(uni.uPinchMix, pm)
   gl.uniform1f(uni.uGather, pinchGather * pm)
@@ -576,6 +673,9 @@ function render() {
   gl.uniform2f(uni.uPinch, pinchPx, pinchPy)
   gl.activeTexture(gl.TEXTURE0); gl.bindTexture(gl.TEXTURE_2D, texFront)
   gl.activeTexture(gl.TEXTURE1); gl.bindTexture(gl.TEXTURE_2D, texBack)
+  gl.activeTexture(gl.TEXTURE2); gl.bindTexture(gl.TEXTURE_2D, texLeds)
+  gl.uniform1f(uni.uLedOn, ledSet.on.value ? 1 : 0)
+  gl.uniform1f(uni.uNight, dark ? 1 : 0)
   gl.drawElements(gl.TRIANGLES, indexCount, gl.UNSIGNED_SHORT, 0)
 }
 
@@ -590,8 +690,14 @@ onMounted(() => {
 onBeforeUnmount(() => { window.removeEventListener('keydown', onKey); cancelAnimationFrame(raf); ro?.disconnect() })
 watch(throwHeightCm, () => render())
 
-const rpm = computed(() => Math.round(omega.value * 60 / (2 * Math.PI)))
+const rpm = computed(() => external.value ? Math.abs(extRpm.value) : Math.round(omega.value * 60 / (2 * Math.PI)))
 const status = computed(() => {
+  if (external.value) {
+    const m = motion.mode.value
+    const what = m === 'live' ? 'Dapo vero' : m === 'file' ? 'Registrazione' : 'Gesture'
+    const clip = m === 'live' ? '' : ' · ' + (motion.currentClip()?.name ?? '')
+    return `${what}${clip}${extInFlight.value ? ' · in volo' : ''}`
+  }
   if (!inHand.value) return `In volo · ${(height.value * 100).toFixed(0)} cm`
   if (boomOn.value) return 'Boomerang · in volo, torna sul dito'
   if (pinchOn.value) return `Pinch verticale · mano ${pinchHand > 0 ? 'destra' : 'sinistra'} · ${pinchPhase === 'pinch' ? 'pinza, frena ma non ferma' : 'lancio all\'altra mano'} · ${Math.round(pinchOmega.value * 60 / (2 * Math.PI))} rpm`
@@ -612,7 +718,7 @@ defineExpose({ flick, flip, reset })
         class="gl"
         :style="{ width: '100%', height: stageH + 'px' }"
         title="Click: flick + lancio · Shift+click: solo flick · D: giro di dito · P: pinch verticale · B: boomerang · F: gira lato"
-        @click="(e) => flick(!e.shiftKey)"
+        @click="(e) => { if (!external) flick(!e.shiftKey) }"
       />
       <p v-if="webglError" class="glerr">{{ webglError }}</p>
       <div class="hud">
@@ -622,7 +728,7 @@ defineExpose({ flick, flip, reset })
       <div class="scale">⌀ 67 cm · 400 g</div>
     </div>
 
-    <div class="controls">
+    <div v-if="!external" class="controls">
       <button class="primary" :disabled="!inHand" @click="flick(true)">Flick + lancio</button>
       <button :disabled="!inHand" @click="flick(false)">Solo flick</button>
       <button :class="{ on: fingerOn }" @click="toggleFinger">Giro di dito (D)</button>
@@ -632,7 +738,7 @@ defineExpose({ flick, flip, reset })
       <button @click="reset">Reset</button>
     </div>
 
-    <details class="settings">
+    <details v-if="!external" class="settings">
       <summary>Impostazioni fisica</summary>
       <label>Spin dato dal flick <span>{{ flickRevs.toFixed(1) }} giri/s</span>
         <input v-model.number="flickRevs" type="range" min="0.5" max="6" step="0.1">
