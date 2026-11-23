@@ -1,0 +1,190 @@
+<!DOCTYPE html>
+<html lang="it">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Dapo IMU Lab</title>
+<style>
+  :root {
+    --bg: #0c0a12; --panel: #15121e; --panel2: #1c1828; --line: #2c2640;
+    --text: #ece8f6; --dim: #9a93b0; --faint: #6c6584;
+    --mag: #ff4fd8; --cyan: #3de0ff; --amber: #ffb547; --green: #5cf29a; --red: #ff5a6e;
+    --ax: #ff6b7d; --ay: #6cf09a; --az: #59b8ff;
+  }
+  * { box-sizing: border-box; }
+  html, body { margin: 0; height: 100%; background: var(--bg); color: var(--text);
+    font: 14px/1.4 system-ui, -apple-system, "Segoe UI", Roboto, sans-serif; }
+  body { display: grid; grid-template-rows: auto 1fr minmax(170px, 26vh); height: 100vh; }
+  button, select, input { font: inherit; color: var(--text); }
+  button { background: var(--panel2); border: 1px solid var(--line); border-radius: 8px;
+    padding: 6px 12px; cursor: pointer; transition: border-color .15s, background .15s; }
+  button:hover:not(:disabled) { border-color: var(--cyan); }
+  button:disabled { opacity: .4; cursor: default; }
+  button.primary { background: linear-gradient(135deg, #5a2a8a, #2a3f8a); border-color: #6a4fb0; }
+  button.rec-on { background: #7a1830; border-color: var(--red); }
+  select, input[type=text] { background: var(--bg); border: 1px solid var(--line); border-radius: 8px; padding: 6px 8px; }
+
+  header { display: flex; align-items: center; gap: 16px; padding: 10px 16px; border-bottom: 1px solid var(--line);
+    background: linear-gradient(90deg, #191226, #0f0d18); flex-wrap: wrap; }
+  .brand { font-weight: 700; letter-spacing: .02em; font-size: 16px; }
+  .brand span { background: linear-gradient(90deg, var(--mag), var(--cyan)); -webkit-background-clip: text; background-clip: text; color: transparent; }
+  .conn { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; margin-left: auto; }
+  .chip { padding: 4px 10px; border-radius: 99px; background: var(--panel2); border: 1px solid var(--line); color: var(--dim); font-size: 12px; }
+  .chip.ok { color: var(--green); border-color: #2d6b4a; }
+  .chip.err { color: var(--red); border-color: #6b2d3a; }
+
+  main { display: grid; grid-template-columns: 1fr 340px; min-height: 0; }
+  #view { position: relative; min-height: 0; overflow: hidden; }
+  #three { position: absolute; inset: 0; }
+  .ov { position: absolute; display: flex; gap: 6px; flex-wrap: wrap; }
+  .ov.tl { top: 10px; left: 12px; font-size: 12px; color: var(--dim); gap: 12px; }
+  .ov.bl { bottom: 10px; left: 12px; }
+  .ov.br { bottom: 10px; right: 12px; }
+  .ov.tr { top: 10px; right: 12px; flex-direction: column; align-items: center; gap: 4px; pointer-events: none; }
+  #pov { width: 180px; height: 180px; border-radius: 50%; background: #08060e; border: 1px solid var(--line); }
+  .ov.tr .cap { font-size: 11px; color: var(--dim); }
+  .ov button { background: rgba(28,24,40,.85); backdrop-filter: blur(4px); font-size: 13px; }
+  .key i { display: inline-block; width: 10px; height: 10px; border-radius: 2px; margin-right: 5px; vertical-align: -1px; }
+  #countdown { position: absolute; inset: 0; display: none; align-items: center; justify-content: center;
+    font-size: 120px; font-weight: 800; color: var(--amber); text-shadow: 0 0 40px rgba(255,181,71,.5); pointer-events: none; }
+
+  aside { border-left: 1px solid var(--line); background: var(--panel); overflow-y: auto; padding: 12px; display: flex; flex-direction: column; gap: 12px; }
+  .stats { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
+  .stat { background: var(--panel2); border: 1px solid var(--line); border-radius: 10px; padding: 8px 10px; }
+  .stat .k { font-size: 11px; color: var(--dim); text-transform: uppercase; letter-spacing: .06em; }
+  .stat .v { font-size: 22px; font-weight: 700; font-variant-numeric: tabular-nums; }
+  .stat .v small { font-size: 12px; color: var(--dim); font-weight: 500; margin-left: 3px; }
+  .stat.wide { grid-column: span 2; }
+  #motion { color: var(--cyan); }
+  .warn { display: none; background: #3a1420; border: 1px solid #7a2a3c; color: #ffc2cc; border-radius: 10px; padding: 8px 10px; font-size: 13px; }
+  .panel { background: var(--panel2); border: 1px solid var(--line); border-radius: 10px; padding: 10px; display: flex; flex-direction: column; gap: 8px; }
+  .panel h3 { margin: 0; font-size: 12px; color: var(--dim); text-transform: uppercase; letter-spacing: .06em; font-weight: 600; }
+  .row { display: flex; gap: 6px; align-items: center; flex-wrap: wrap; }
+  .row > input[type=text] { flex: 1; min-width: 0; }
+  .labels button { padding: 3px 9px; font-size: 12px; border-radius: 99px; }
+  #counts { font-size: 12px; color: var(--dim); font-variant-numeric: tabular-nums; }
+  #log { font: 11px/1.35 ui-monospace, Menlo, Consolas, monospace; color: var(--dim); max-height: 120px; overflow-y: auto; white-space: pre-wrap; }
+  .hint { font-size: 12px; color: var(--faint); }
+
+  .charts { display: grid; grid-template-columns: 1fr 1fr; border-top: 1px solid var(--line); min-height: 0; }
+  .charts canvas { width: 100%; height: 100%; display: block; min-height: 0; }
+  .charts > div { position: relative; min-height: 0; }
+  .charts > div + div { border-left: 1px solid var(--line); }
+
+  @media (max-width: 900px) {
+    body { grid-template-rows: auto auto auto; height: auto; }
+    main { grid-template-columns: 1fr; }
+    #view { height: 60vh; }
+    aside { border-left: 0; border-top: 1px solid var(--line); }
+    .charts { grid-template-columns: 1fr; }
+    .charts > div { height: 180px; }
+  }
+</style>
+</head>
+<body>
+<header>
+  <div class="brand">✦ <span>Dapo IMU Lab</span></div>
+  <div class="conn">
+    <button id="btnSerial" class="primary" title="Scheda collegata col cavo USB">USB</button>
+    <button id="btnBle" class="primary" title="Scheda a batteria, via Bluetooth">Bluetooth</button>
+    <button id="btnDemo" title="Dati simulati, senza scheda">Demo</button>
+    <button id="btnDisc" disabled>Disconnetti</button>
+    <span id="status" class="chip">non connesso</span>
+  </div>
+</header>
+
+<main>
+  <section id="view">
+    <div id="three"></div>
+    <div class="ov tl key">
+      <span><i style="background:var(--ax)"></i>X</span>
+      <span><i style="background:var(--ay)"></i>Y</span>
+      <span><i style="background:var(--az)"></i>Z (normale)</span>
+      <span><i style="background:var(--amber);border-radius:50%"></i>punta +X</span>
+    </div>
+    <div class="ov bl">
+      <button id="btnZero" title="Riallinea la rotazione attorno alla verticale (il giroscopio da solo deriva)">Zero</button>
+      <button id="btnLevel" title="La scheda riparte 'in bolla' usando la gravità">Livella</button>
+      <button id="btnCal" title="Ricalibra il giroscopio: tieni la dapo ferma ~1 s">Calibra gyro</button>
+    </div>
+    <div class="ov br">
+      <button id="btnTop">Vista dall'alto</button>
+      <button id="btnSide">Vista 3/4</button>
+    </div>
+    <div class="ov tr"><canvas id="pov" width="360" height="360"></canvas><div class="cap">cosa vede l'occhio</div></div>
+    <div id="countdown"></div>
+  </section>
+
+  <aside>
+    <div class="stats">
+      <div class="stat"><div class="k">Giri / min</div><div class="v" id="sRpm">—</div></div>
+      <div class="stat"><div class="k">Rotazione</div><div class="v" id="sRate">—<small>°/s</small></div></div>
+      <div class="stat"><div class="k">Inclinazione</div><div class="v" id="sTilt">—</div></div>
+      <div class="stat"><div class="k">|a| totale</div><div class="v" id="sAcc">—<small>g</small></div></div>
+      <div class="stat wide"><div class="k">Stato (regole semplici, non ancora ML)</div><div class="v" id="motion">—</div></div>
+      <div class="stat"><div class="k">Faccia in alto</div><div class="v" id="sFace">—</div></div>
+      <div class="stat"><div class="k">Dati</div><div class="v" id="sHz">—<small>Hz</small></div></div>
+    </div>
+    <div class="warn" id="warn"></div>
+
+    <div class="panel">
+      <h3>Anteprima LED</h3>
+      <div class="row">
+        <select id="ledLayout" title="Dove sono cuciti i LED">
+          <option value="raggi" selected>Raggi: 8 × 16 LED</option>
+          <option value="bordo">Bordo: 96 LED</option>
+        </select>
+        <select id="ledMode" style="flex:1">
+          <option value="speed">Velocità → colore</option>
+          <option value="tacho">Tachimetro sui raggi</option>
+          <option value="rings">Anelli + onda alla presa</option>
+          <option value="spiral">Spirale ferma nel mondo</option>
+          <option value="pov">POV: cuore fermo nell'aria</option>
+          <option value="world">Arco fermo nel mondo</option>
+          <option value="gravity">Fuoco verso il basso</option>
+          <option value="toss">Lanci e prese</option>
+          <option value="off">Spenti</option>
+        </select>
+      </div>
+      <div class="hint">I pallini sono LED simulati che reagiscono ai dati veri. Il cerchio in alto a destra mostra cosa vede l'occhio quando la dapo gira (persistenza della visione). La logica è nella funzione <code>ledEffect()</code> di questa pagina: è il prototipo di quello che poi scriverai sulla scheda.</div>
+    </div>
+
+    <div class="panel">
+      <h3>Registra dati per TinyML</h3>
+      <div class="row">
+        <input type="text" id="label" value="ferma" placeholder="etichetta">
+        <select id="dur" title="Durata">
+          <option value="0">manuale</option>
+          <option value="5">5 s</option>
+          <option value="10" selected>10 s</option>
+          <option value="20">20 s</option>
+        </select>
+      </div>
+      <div class="row labels" id="quickLabels"></div>
+      <div class="row">
+        <button id="btnRec">● Registra</button>
+        <button id="btnCsv" disabled>Scarica CSV</button>
+        <button id="btnClear" disabled>Svuota</button>
+      </div>
+      <div id="counts">nessun dato registrato</div>
+      <div class="hint">Con una durata impostata parte un conto alla rovescia di 3 s con un bip: hai il tempo di prendere la dapo e iniziare il movimento.</div>
+    </div>
+
+    <div class="panel">
+      <h3>Messaggi</h3>
+      <div id="log"></div>
+    </div>
+  </aside>
+</main>
+
+<section class="charts">
+  <div><canvas id="chartA"></canvas></div>
+  <div><canvas id="chartG"></canvas></div>
+</section>
+
+<script>/*__THREE__*/</script>
+<script>
+/*__APP__*/
+</script>
+</body>
+</html>

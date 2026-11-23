@@ -1,0 +1,14 @@
+{
+  "name": "dapo-lab",
+  "private": true,
+  "description": "Visualizzatore 3D e registratore di dati per il firmware DapoIMU",
+  "type": "module",
+  "scripts": {
+    "build": "node build.mjs",
+    "check": "node --check src/app.js"
+  },
+  "devDependencies": {
+    "esbuild": "0.28.2",
+    "three": "0.170.0"
+  }
+}
