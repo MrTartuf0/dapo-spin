@@ -1,10 +1,10 @@
 # ✦ Dapo Twin
 
-[![CI](https://github.com/MrTartuf0/dapo-spin/actions/workflows/ci.yml/badge.svg)](https://github.com/MrTartuf0/dapo-spin/actions/workflows/ci.yml)
-[![Sito](https://img.shields.io/badge/sito-dapo--twin.netlify.app-4fd1c5)](https://dapo-twin.netlify.app)
-[![Firmware](https://img.shields.io/github/v/release/MrTartuf0/dapo-spin?label=firmware)](https://github.com/MrTartuf0/dapo-spin/releases/latest)
+[![CI](https://github.com/MrTartuf0/dapo-twin-led/actions/workflows/ci.yml/badge.svg)](https://github.com/MrTartuf0/dapo-twin-led/actions/workflows/ci.yml)
+[![Sito](https://img.shields.io/badge/sito-dapo--twin--led.netlify.app-4fd1c5)](https://dapo-twin-led.netlify.app)
+[![Firmware](https://img.shields.io/github/v/release/MrTartuf0/dapo-twin-led?label=firmware)](https://github.com/MrTartuf0/dapo-twin-led/releases/latest)
 
-**Prova online: https://dapo-twin.netlify.app** · [Firmware](https://dapo-twin.netlify.app/firmware) · [Lab](https://dapo-twin.netlify.app/lab/) · [Release del firmware](https://github.com/MrTartuf0/dapo-spin/releases)
+**Prova online: https://dapo-twin-led.netlify.app** · [Firmware](https://dapo-twin-led.netlify.app/firmware) · [Lab](https://dapo-twin-led.netlify.app/lab/) · [Release del firmware](https://github.com/MrTartuf0/dapo-twin-led/releases)
 
 La dapo (la stella di stoffa a 8 punte che si fa girare sul dito) e il suo gemello digitale.
 Carichi un design, lo guardi girare nel simulatore con flick, lanci e trick; poi prendi la **dapo vera**,
@@ -50,11 +50,11 @@ con il link scritto nei commenti della PR.
 
 ### Configurare Netlify (una volta)
 1. Su Netlify: **Add new site → Deploy manually**, trascina una cartella qualsiasi, poi in *Site configuration*
-   rinomina il sito in `dapo-twin` (se il nome è preso, aggiorna i link di questo README).
+   rinomina il sito in `dapo-twin-led` (se il nome è preso, aggiorna i link di questo README).
 2. Copia il **Site ID** (*Site configuration → General*) e crea un **Personal access token**
    (*User settings → Applications*).
 3. Su GitHub: *Settings → Secrets and variables → Actions* → aggiungi `NETLIFY_SITE_ID` e `NETLIFY_AUTH_TOKEN`.
-4. Su GitHub, nella pagina del repo: ⚙️ accanto ad *About* → *Website* = `https://dapo-twin.netlify.app`.
+4. Su GitHub, nella pagina del repo: ⚙️ accanto ad *About* → *Website* = `https://dapo-twin-led.netlify.app`.
 
 Senza i segreti la CI fa tutto il resto e salta solo la pubblicazione.
 
@@ -62,7 +62,7 @@ Senza i segreti la CI fa tutto il resto e salta solo la pubblicazione.
 ```bash
 git tag v0.2.0 && git push origin v0.2.0
 ```
-La CI compila con la versione `v0.2.0`, crea la [Release](https://github.com/MrTartuf0/dapo-spin/releases)
+La CI compila con la versione `v0.2.0`, crea la [Release](https://github.com/MrTartuf0/dapo-twin-led/releases)
 con `.uf2` (USB), `.bin` (browser), `-dfu.zip` (telefono), `.hex` e `firmware.json`, e pubblica il sito
 con quel firmware nella pagina `/firmware`.
 
@@ -83,7 +83,7 @@ npm run generate   # build statica in .output/public
 3. Gestore librerie: **Seeed Arduino LSM6DS3** (non *Arduino_LSM6DS3*) e **ArduinoBLE**.
 4. Carica `firmware/DapoIMU/DapoIMU.ino`. All'accensione tieni la dapo ferma ~1 s (LED rosso = calibrazione).
 
-Senza Arduino IDE: scarica il `.uf2` dalla [Release](https://github.com/MrTartuf0/dapo-spin/releases/latest),
+Senza Arduino IDE: scarica il `.uf2` dalla [Release](https://github.com/MrTartuf0/dapo-twin-led/releases/latest),
 tocca due volte il reset della XIAO e trascina il file sul disco `XIAO-SENSE`. Da lì in poi si aggiorna
 anche senza cavo, dalla pagina `/firmware` del sito.
 

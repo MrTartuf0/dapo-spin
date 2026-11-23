@@ -1,7 +1,7 @@
 <script setup lang="ts">
 /** barra di navigazione comune: simulatore, firmware, Lab, GitHub */
 const route = useRoute()
-const REPO = 'https://github.com/MrTartuf0/dapo-spin'
+const REPO = 'https://github.com/MrTartuf0/dapo-twin-led'
 </script>
 
 <template>

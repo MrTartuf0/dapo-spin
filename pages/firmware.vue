@@ -7,7 +7,7 @@ import type { OtaProgress } from '~/composables/useDapoBle'
 
 useHead({ title: 'Firmware · Dapo Twin' })
 
-const REPO = 'https://github.com/MrTartuf0/dapo-spin'
+const REPO = 'https://github.com/MrTartuf0/dapo-twin-led'
 const ble = useDapoBle()
 
 interface SiteFirmware { version: string; file: string; size: number; crc32: number; sha256: string }
