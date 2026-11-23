@@ -10,8 +10,8 @@ jobs:
     name: Build simulatore (Nuxt)
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-node@v4
+      - uses: actions/checkout@v5
+      - uses: actions/setup-node@v5
         with:
           node-version: 22
           cache: npm
@@ -22,10 +22,12 @@ jobs:
     name: Compila firmware (XIAO nRF52840 Sense)
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
       - uses: arduino/setup-arduino-cli@v2
       - name: Core Seeed mbed e librerie
         run: |
+          # il core di Seeed lo chiama per creare il pacchetto da caricare, ma su Linux non lo installa
+          pipx install adafruit-nrfutil
           arduino-cli config init
           arduino-cli config add board_manager.additional_urls https://files.seeedstudio.com/arduino/package_seeeduino_boards_index.json
           arduino-cli core update-index
@@ -38,7 +40,7 @@ jobs:
     name: Test firmware simulato
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
       - name: Compila ed esegui
         working-directory: tests/firmware-sim
         run: g++ -std=c++17 -O2 -Wall -Imock test_fusion.cpp -o test_fusion && ./test_fusion
@@ -50,8 +52,8 @@ jobs:
       run:
         working-directory: tools/dapo-lab
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-node@v4
+      - uses: actions/checkout@v5
+      - uses: actions/setup-node@v5
         with:
           node-version: 22
       - run: npm ci
