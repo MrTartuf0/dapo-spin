@@ -34,7 +34,9 @@ public/designs/                   design di default
 firmware/DapoIMU/                 sketch Arduino per la XIAO (IMU, filtro di orientamento, USB + BLE)
 tools/dapo-lab/                   strumento per la scheda: dapo-lab.html pronto da aprire + sorgenti
 tests/firmware-sim/               test del firmware sul computer, con sensori simulati
+tools/guida/                      figure e PDF della guida di costruzione
 docs/                             hardware, LED, tessuto, formato dei dati
+docs/costruzione/                 guida di costruzione: elettronica, saldature, cucito, costi (+ PDF)
 data/                             dataset registrati con il Dapo Lab
 ```
 
@@ -61,6 +63,7 @@ con il link scritto nei commenti della PR.
 | `/` | simulatore: design, fisica, trick |
 | `/firmware` | aggiornare la dapo: Bluetooth dal browser, telefono (bootloader), USB |
 | `/lab/` | Dapo Lab |
+| `/guida/dapo-twin-guida-costruzione.pdf` | la guida di costruzione in PDF, con il cartamodello 1:1 |
 | `/firmware/latest.json`, `latest.bin`, `*.uf2`, `*-dfu.zip` | il firmware costruito dallo stesso commit del sito |
 
 ### Configurare Netlify (una volta)
@@ -126,6 +129,8 @@ compila il firmware e prepara i binari, esegue i test simulati, ricostruisce il 
 sito, lo pubblica su Netlify e, sui tag `v*`, crea la Release del firmware.
 
 ## Documentazione
+- [Guida di costruzione e analisi](docs/costruzione/guida-costruzione.md): elettronica, saldature, cucito da zero,
+  materiali, costi e vendita ([PDF con il cartamodello 1:1](docs/costruzione/dapo-twin-guida-costruzione.pdf))
 - [Hardware, LED e tessuto](docs/hardware.md)
 - [Formato dei dati e comandi](docs/protocollo-dati.md)
 
