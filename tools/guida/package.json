@@ -1,0 +1,16 @@
+{
+  "name": "dapo-twin-guida",
+  "private": true,
+  "type": "module",
+  "description": "Figure SVG e PDF della guida di costruzione (docs/costruzione)",
+  "scripts": {
+    "figure": "node figure.mjs",
+    "pdf": "node build.mjs",
+    "build": "node figure.mjs && node build.mjs"
+  },
+  "dependencies": {
+    "marked": "^15.0.0",
+    "pdf-lib": "^1.17.1",
+    "puppeteer-core": "^24.0.0"
+  }
+}

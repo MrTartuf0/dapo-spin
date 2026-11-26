@@ -2,7 +2,7 @@
 #   firmware      compila DapoIMU per la XIAO e prepara i binari (.uf2, .zip, .bin, .hex)
 #   firmware-sim  test del firmware sul PC (orientamento + aggiornamento via Bluetooth)
 #   dapo-lab      ricostruisce tools/dapo-lab/dapo-lab.html e controlla che sia aggiornato
-#   site          build del simulatore + Dapo Lab in /lab + firmware in /firmware
+#   site          build del simulatore + Dapo Lab in /lab + firmware in /firmware + guida PDF in /guida
 #   deploy        Netlify: produzione da main e dai tag, anteprima per ogni pull request
 #   release       sui tag v*: pagina Release con i binari del firmware
 name: CI
@@ -115,6 +115,8 @@ jobs:
       - run: npm run generate
       - name: Dapo Lab in /lab
         run: mkdir -p .output/public/lab && cp tools/dapo-lab/dapo-lab.html .output/public/lab/index.html
+      - name: Guida di costruzione in /guida
+        run: mkdir -p .output/public/guida && cp docs/costruzione/dapo-twin-guida-costruzione.pdf .output/public/guida/
       - uses: actions/download-artifact@v4
         with:
           name: firmware

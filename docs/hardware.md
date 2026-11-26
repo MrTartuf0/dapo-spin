@@ -1,6 +1,8 @@
 # Hardware, LED e tessuto
 
 Appunti di progetto. Le scelte segnate **da decidere** hanno una issue aperta.
+Le decisioni prese, con schemi, saldature, cucito e costi, sono nella
+[guida di costruzione](costruzione/guida-costruzione.md).
 
 ## La dapo di riferimento
 Le dapo in commercio sono stelle a 8 punte (due quadrati sovrapposti) di circa 65–69 cm da punta a punta,
@@ -40,7 +42,9 @@ non ci sta più: restano la modalità OTA del bootloader (comando `u` + nRF Conn
 - **8 raggi o 4?** Per le immagini POV ogni raggio ridisegna l'immagine: a 3 giri/s, 8 raggi = 24 passaggi al secondo
   per punto, 4 raggi = 12 (sfarfalla). Per effetti di solo colore bastano 4.
 
-### Tipo di LED — da decidere
+### Tipo di LED — deciso (guida, sezione 2.3)
+APA102-2020 da 4 mm per i prototipi, HD107S-2020 (o HD108) su circuito flessibile nella versione 2.
+
 | | APA102 / SK9822 | WS2812 / SK6812 |
 |---|---|---|
 | Fili dati | dati + clock | solo dati |
@@ -48,15 +52,15 @@ non ci sta più: restano la modalità OTA del bootloader (comando `u` + nRF Conn
 | PWM | veloce: niente scie tratteggiate | lento: a luminosità media le punte (5–6 m/s) lasciano tratteggi |
 | Adatti al POV | ✅ | ⚠️ al limite |
 
-### Una faccia o due — da decidere
-Le strisce fanno luce da un lato solo. Opzioni: due strisce schiena contro schiena (doppio peso/consumo),
-4 raggi per faccia (POV più debole), oppure una sola faccia principale.
+### Una faccia o due — deciso: due (guida, sezione 2.4)
+Due strisce schiena contro schiena per raggio, in un'unica catena a zig-zag: 8 × 2 × 16 = 256 LED.
+Il consumo dipende dal tetto di corrente del firmware; la corrente a riposo raddoppia e si toglie con un MOSFET.
 
 ## Elettrica
-- LED alimentati **direttamente dalla LiPo**, non dal 3,3 V della XIAO.
-- 128 LED al massimo del bianco ≈ 8 A: **limite di luminosità nel firmware** (obiettivo 1,5–2 A di picco).
-- Dati: con APA102 servono 2 pin per catena → 4 catene da 2 raggi = 8 pin (la XIAO ne ha 11), oppure raggi in serie
-  con due fili sottili di ritorno. Con WS2812 a 3,3 V di segnale valutare un level shifter (es. 74AHCT125).
+- LED alimentati **direttamente dalla LiPo**, non dal 3,3 V della XIAO, con un interruttore a MOSFET.
+- 256 LED 2020 al bianco pieno ≈ 5 A: **limite di corrente nel firmware** (circa 1 A con 2 × 600 mAh).
+- Una sola catena a zig-zag (2 pin: SPI SCK e MOSI) con **2× SN74LV1T34** alimentati dalla linea LED.
+  Il 74AHCT125 va bene solo con i LED a 5 V: con la LiPo (3,0–4,2 V) è fuori specifica.
 - Le saldature sull'anello sono il punto debole: fissare i cavi, termorestringente, imbottitura al centro.
 
 ## Tessuto
